@@ -1,0 +1,73 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "打包 APK · 开发环境",
+      "type": "shell",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1 -Env dev -Target apk",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "打包 APK · 测试环境",
+      "type": "shell",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1 -Env staging -Target apk",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "打包 APK · 生产环境",
+      "type": "shell",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1 -Env prod -Target apk",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "打包 Windows · 生产环境",
+      "type": "shell",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1 -Env prod -Target windows",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "打包 Web · 生产环境",
+      "type": "shell",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1 -Env prod -Target web",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    }
+  ]
+}
