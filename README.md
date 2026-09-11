@@ -4,7 +4,7 @@
 
 当前版本：登录 / 注册 / 广场 / 圈子 / 私信 / 通知 / 搜索都按 [接口文档](docs/backend-api.md) 请求 `API_BASE_URL`。模型字段与 `UserPublic`、`PostCard`、`CircleItem` 等资源对象对齐。无 `ApiClient` 的单元测试仍使用同结构的本地 seed。
 
-非生产环境（开发 / 测试）打包后，左下角有「网络」按钮，可查看每次请求的 URL、状态码、请求体和响应体，方便确认注册有没有真正打到服务器。
+非生产环境（开发 / 测试）打包后，左下角有「环境」和「网络」按钮：前者切换接口 Base URL，后者查看请求详情。生产包不会带这两个入口。
 
 ## 功能
 
@@ -30,8 +30,8 @@
 
 | 环境 | 配置文件 | `APP_ENV` | 默认 API Base URL |
 | --- | --- | --- | --- |
-| 开发 | `env/development.env` | `dev` | `http://172.28.0.1:8080/v1` |
-| 测试 | `env/staging.env` | `staging` | `https://api-staging.dimension-link.dev/v1` |
+| 开发 | `env/development.env` | `dev` | `http://127.0.0.1:8080/v1` |
+| 测试 | `env/staging.env` | `staging` | `http://123.56.169.7/v1` |
 | 生产 | `env/production.env` | `prod` | `https://api.dimension-link.dev/v1` |
 
 变量说明：

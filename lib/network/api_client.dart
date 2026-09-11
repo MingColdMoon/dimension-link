@@ -1,7 +1,7 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
@@ -16,11 +16,11 @@ class ApiClient {
     Dio? dio,
     this.logStore,
     AppConfig? config,
-  })  : _config = config ?? AppConfig.current,
-        dio = dio ??
+    String? baseUrl,
+  }) : dio = dio ??
             Dio(
               BaseOptions(
-                baseUrl: (config ?? AppConfig.current).apiBaseUrl,
+                baseUrl: baseUrl ?? (config ?? AppConfig.current).apiBaseUrl,
                 connectTimeout: const Duration(seconds: 8),
                 receiveTimeout: const Duration(seconds: 12),
                 headers: const {
@@ -36,20 +36,32 @@ class ApiClient {
   static const accessTokenKey = 'dimension_link_access_token';
   static const refreshTokenKey = 'dimension_link_refresh_token';
 
+  static const _anonymousPaths = {'/auth/login', '/auth/register', '/auth/refresh'};
+
   final Dio dio;
   final NetworkLogStore? logStore;
-  final AppConfig _config;
   String? accessToken;
+  String? refreshToken;
+  Future<void>? _refreshing;
 
-  String get baseUrl => _config.apiBaseUrl;
+  String get baseUrl => dio.options.baseUrl;
+
+  /// 运行时切换接口地址（开发/测试环境切换工具使用）。
+  void applyBaseUrl(String url) {
+    dio.options.baseUrl = url;
+    accessToken = null;
+    refreshToken = null;
+  }
 
   Future<void> restoreTokens() async {
     final prefs = await SharedPreferences.getInstance();
     accessToken = prefs.getString(accessTokenKey);
+    refreshToken = prefs.getString(refreshTokenKey);
   }
 
   Future<void> persistSession(AuthSession session) async {
     accessToken = session.accessToken;
+    refreshToken = session.refreshToken;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(accessTokenKey, session.accessToken);
     await prefs.setString(refreshTokenKey, session.refreshToken);
@@ -57,6 +69,7 @@ class ApiClient {
 
   Future<void> clearTokens() async {
     accessToken = null;
+    refreshToken = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(accessTokenKey);
     await prefs.remove(refreshTokenKey);
@@ -95,7 +108,36 @@ class ApiClient {
   }
 
   Future<void> logoutRemote() async {
-    await _request('POST', '/auth/logout');
+    await _request(
+      'POST',
+      '/auth/logout',
+      data: {
+        if (refreshToken != null && refreshToken!.isNotEmpty) 'refreshToken': refreshToken,
+      },
+    );
+  }
+
+  /// 用 refreshToken 换新的 token 对。对应 `POST /v1/auth/refresh`。
+  Future<AuthSession> refreshSession() async {
+    var token = refreshToken;
+    if (token == null || token.isEmpty) {
+      final prefs = await SharedPreferences.getInstance();
+      token = prefs.getString(refreshTokenKey);
+      refreshToken = token;
+    }
+    if (token == null || token.isEmpty) {
+      throw const ApiException(code: 1006, message: '请先登录');
+    }
+    final session = AuthSession.fromJson(
+      await _request(
+        'POST',
+        '/auth/refresh',
+        data: {'refreshToken': token},
+        allowRefresh: false,
+      ),
+    );
+    await persistSession(session);
+    return session;
   }
 
   Future<MeProfile> getMe() async {
@@ -126,8 +168,8 @@ class ApiClient {
   Future<({bool isFollowing, int followers})> toggleFollow(String userId) async {
     final data = await _request('POST', '/users/$userId/follow');
     return (
-      isFollowing: data['isFollowing'] as bool? ?? false,
-      followers: data['followers'] as int? ?? 0,
+      isFollowing: asBool(pick(data, ['isFollowing', 'is_following'])),
+      followers: asInt(data['followers']),
     );
   }
 
@@ -136,6 +178,7 @@ class ApiClient {
       '/posts',
       Post.fromJson,
       query: {
+        'limit': 50,
         'authorId': ?authorId,
         'circleId': ?circleId,
       },
@@ -169,21 +212,21 @@ class ApiClient {
   Future<({bool liked, int likeCount})> toggleLike(String postId) async {
     final data = await _request('POST', '/posts/$postId/like');
     return (
-      liked: data['liked'] as bool? ?? false,
-      likeCount: data['likeCount'] as int? ?? 0,
+      liked: asBool(data['liked']),
+      likeCount: asInt(pick(data, ['likeCount', 'like_count'])),
     );
   }
 
   Future<({bool starred, int starCount})> toggleStar(String postId) async {
     final data = await _request('POST', '/posts/$postId/star');
     return (
-      starred: data['starred'] as bool? ?? false,
-      starCount: data['starCount'] as int? ?? 0,
+      starred: asBool(data['starred']),
+      starCount: asInt(pick(data, ['starCount', 'star_count'])),
     );
   }
 
   Future<List<Comment>> listComments(String postId) {
-    return _getItems('/posts/$postId/comments', Comment.fromJson);
+    return _getItems('/posts/$postId/comments', Comment.fromJson, query: {'limit': 50});
   }
 
   Future<Comment> createComment(String postId, String content) async {
@@ -203,8 +246,8 @@ class ApiClient {
   Future<({bool joined, int memberCount})> toggleJoinCircle(String circleId) async {
     final data = await _request('POST', '/circles/$circleId/join');
     return (
-      joined: data['joined'] as bool? ?? false,
-      memberCount: data['memberCount'] as int? ?? 0,
+      joined: asBool(data['joined']),
+      memberCount: asInt(pick(data, ['memberCount', 'member_count'])),
     );
   }
 
@@ -218,8 +261,28 @@ class ApiClient {
     );
   }
 
+  Future<Conversation> createGroup({
+    required List<String> memberIds,
+    String title = '',
+  }) async {
+    return Conversation.fromJson(
+      await _request(
+        'POST',
+        '/conversations',
+        data: {
+          'memberIds': memberIds,
+          if (title.trim().isNotEmpty) 'title': title.trim(),
+        },
+      ),
+    );
+  }
+
   Future<List<ChatMessage>> listMessages(String conversationId) {
-    return _getItems('/conversations/$conversationId/messages', ChatMessage.fromJson);
+    return _getItems(
+      '/conversations/$conversationId/messages',
+      ChatMessage.fromJson,
+      query: {'limit': 50},
+    );
   }
 
   Future<ChatMessage> sendMessage(String conversationId, String text) async {
@@ -234,16 +297,16 @@ class ApiClient {
 
   Future<int> markConversationRead(String conversationId) async {
     final data = await _request('POST', '/conversations/$conversationId/read');
-    return data['unread'] as int? ?? 0;
+    return asInt(data['unread']);
   }
 
   Future<List<Notice>> listNotices() {
-    return _getItems('/notices', Notice.fromJson);
+    return _getItems('/notices', Notice.fromJson, query: {'limit': 50});
   }
 
   Future<SearchResult> search(String query) async {
     return SearchResult.fromJson(
-      await _request('GET', '/search', query: {'q': query}),
+      await _request('GET', '/search', query: {'q': query, 'limit': 50}),
     );
   }
 
@@ -253,7 +316,15 @@ class ApiClient {
     Map<String, dynamic>? query,
   }) async {
     final data = await _request('GET', path, query: query);
-    return [for (final item in asJsonMapList(data['items'])) parse(item)];
+    final items = <T>[];
+    for (final item in extractItems(data)) {
+      try {
+        items.add(parse(item));
+      } catch (error, stack) {
+        debugPrint('解析 $path 条目失败: $error\n$stack');
+      }
+    }
+    return items;
   }
 
   Future<Map<String, dynamic>> _request(
@@ -261,6 +332,7 @@ class ApiClient {
     String path, {
     Object? data,
     Map<String, dynamic>? query,
+    bool allowRefresh = true,
   }) async {
     try {
       final response = await dio.request<dynamic>(
@@ -273,42 +345,109 @@ class ApiClient {
     } on ApiException {
       rethrow;
     } on DioException catch (error) {
+      if (allowRefresh && _shouldRefresh(path, error)) {
+        try {
+          await _refreshOnce();
+          return await _request(
+            method,
+            path,
+            data: data,
+            query: query,
+            allowRefresh: false,
+          );
+        } catch (refreshError) {
+          debugPrint('刷新通行证失败: $refreshError');
+        }
+      }
       throw _fromDio(error);
-    } catch (_) {
+    } catch (error, stack) {
+      debugPrint('接口解析失败 $method $path: $error\n$stack');
       throw const ApiException(message: '次元暂时断开了');
     }
   }
 
+  bool _shouldRefresh(String path, DioException error) {
+    if (_anonymousPaths.contains(path) || path == '/auth/logout') {
+      return false;
+    }
+    if (error.response?.statusCode != 401) {
+      return false;
+    }
+    return (refreshToken != null && refreshToken!.isNotEmpty);
+  }
+
+  Future<void> _refreshOnce() {
+    return _refreshing ??= () async {
+      try {
+        await refreshSession();
+      } finally {
+        _refreshing = null;
+      }
+    }();
+  }
+
   Map<String, dynamic> _unwrap(dynamic data) {
-    if (data is! Map) {
+    final decoded = _decodeBody(data);
+    if (decoded is List) {
+      return {'items': decoded};
+    }
+    if (decoded is! Map) {
       throw const ApiException(message: '次元暂时断开了');
     }
-    final map = Map<String, dynamic>.from(data);
-    final code = map['code'] as int? ?? 0;
-    final message = (map['message'] as String?)?.trim();
-    if (code != 0) {
+    final map = Map<String, dynamic>.from(decoded);
+    final hasCode = map.containsKey('code') || map.containsKey('status');
+    final code = asInt(pick(map, ['code', 'status']));
+    final message = asString(pick(map, ['message', 'msg'])).trim();
+    if (hasCode && !_isSuccessCode(code)) {
       throw ApiException(
         code: code,
-        message: (message == null || message.isEmpty) ? '次元暂时断开了' : message,
+        message: message.isEmpty ? '次元暂时断开了' : message,
       );
     }
-    final inner = map['data'];
-    if (inner == null) {
-      return <String, dynamic>{};
+    var inner = map['data'] ?? map['result'] ?? map['payload'];
+    if (inner is String) {
+      inner = _decodeBody(inner);
+    }
+    if (inner is List) {
+      return {'items': inner};
     }
     if (inner is Map) {
       return Map<String, dynamic>.from(inner);
     }
-    throw const ApiException(message: '次元暂时断开了');
+    // 兼容 items 直接挂在根上：{ code: 0, items: [...] }
+    if (extractItems(map).isNotEmpty || map.containsKey('items')) {
+      return map;
+    }
+    return <String, dynamic>{};
   }
 
+  /// 兼容 `text/plain` JSON、以及已经是 Map/List 的响应。
+  dynamic _decodeBody(dynamic data) {
+    if (data is String) {
+      final trimmed = data.trim();
+      if (trimmed.isEmpty) {
+        return null;
+      }
+      try {
+        return jsonDecode(trimmed);
+      } catch (_) {
+        return data;
+      }
+    }
+    return data;
+  }
+
+  /// 文档约定 0；部分后端用 200 / 1 表示成功。
+  bool _isSuccessCode(int code) => code == 0 || code == 1 || code == 200;
+
   ApiException _fromDio(DioException error) {
-    final data = error.response?.data;
+    final data = _decodeBody(error.response?.data);
     if (data is Map) {
-      final message = (data['message'] as String?)?.trim();
-      if (message != null && message.isNotEmpty) {
+      final map = Map<String, dynamic>.from(data);
+      final message = asString(pick(map, ['message', 'msg'])).trim();
+      if (message.isNotEmpty) {
         return ApiException(
-          code: data['code'] as int? ?? 5000,
+          code: asInt(pick(map, ['code']), 5000),
           message: message,
           httpStatus: error.response?.statusCode,
         );
@@ -319,7 +458,20 @@ class ApiClient {
       case DioExceptionType.sendTimeout:
       case DioExceptionType.receiveTimeout:
       case DioExceptionType.connectionError:
-        return const ApiException(message: '连不上次元服务器，请检查网络或 API 地址');
+      case DioExceptionType.unknown:
+        final target = error.requestOptions.uri.toString();
+        final detail = '${error.message ?? ''} ${error.error ?? ''}';
+        final refused = detail.contains('Connection refused') ||
+            detail.contains('Failed host lookup') ||
+            detail.contains('SocketException');
+        if (error.type != DioExceptionType.unknown || refused) {
+          return ApiException(
+            message: refused
+                ? '连不上 $target。Android 模拟器请使用 10.0.2.2；真机请用电脑局域网 IP，或执行 adb reverse tcp:8080 tcp:8080。并确认后端已启动。'
+                : '连不上次元服务器（$target），请检查网络或 API 地址',
+          );
+        }
+        return const ApiException(message: '次元暂时断开了');
       default:
         return const ApiException(message: '次元暂时断开了');
     }
@@ -333,9 +485,12 @@ class _AuthInterceptor extends Interceptor {
 
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
-    final token = _client.accessToken;
-    if (token != null && token.isNotEmpty) {
-      options.headers['Authorization'] = 'Bearer $token';
+    final path = options.path;
+    if (!ApiClient._anonymousPaths.contains(path)) {
+      final token = _client.accessToken;
+      if (token != null && token.isNotEmpty) {
+        options.headers['Authorization'] = 'Bearer $token';
+      }
     }
     handler.next(options);
   }

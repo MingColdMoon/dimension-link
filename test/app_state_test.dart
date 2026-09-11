@@ -51,4 +51,20 @@ void main() {
     expect(state.searchUsers('桜井').first.nickname, '桜井澪');
     expect(state.searchPosts('开黑'), isNotEmpty);
   });
+
+  test('可以拉群，并给群发一条消息', () async {
+    final state = AppState();
+    await state.login('星野铃', '123456');
+    final err = await state.createGroupChat(
+      memberIds: ['u_sakurai', 'u_tsukimi'],
+      title: '测试群',
+    );
+    expect(err, isNull);
+    final group = state.conversations.firstWhere((item) => item.title == '测试群');
+    expect(group.isGroup, isTrue);
+    expect(group.members.length, greaterThanOrEqualTo(3));
+    final sendErr = await state.sendMessage(group.id, '群建好了，来集合');
+    expect(sendErr, isNull);
+    expect(state.conversationById(group.id).lastMessage?.text, '群建好了，来集合');
+  });
 }

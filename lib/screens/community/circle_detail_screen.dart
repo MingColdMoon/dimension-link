@@ -28,7 +28,15 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final circle = state.circleById(widget.circleId);
+    final circle = state.findCircle(widget.circleId);
+    if (circle == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('圈子')),
+        body: const StarryBackdrop(
+          child: Center(child: EmptyHint(text: '正在寻找这个圈子…')),
+        ),
+      );
+    }
     final posts = state.postsOfCircle(widget.circleId);
     final joined = circle.joined;
 

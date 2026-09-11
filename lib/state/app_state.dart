@@ -38,10 +38,12 @@ class AppState extends ChangeNotifier {
   List<Circle> _searchCircles = [];
   List<Post> _searchPosts = [];
 
+  String? _feedError;
   String? _currentUserId;
   bool _booted = false;
   int _tabIndex = 0;
 
+  String? get feedError => _feedError;
   bool get booted => _booted;
   bool get isLoggedIn => _currentUserId != null;
   int get tabIndex => _tabIndex;
@@ -75,14 +77,53 @@ class AppState extends ChangeNotifier {
   List<Circle> get searchResultCircles => List.unmodifiable(_searchCircles);
   List<Post> get searchResultPosts => List.unmodifiable(_searchPosts);
 
-  AppUser userById(String id) => _users.firstWhere((u) => u.id == id);
+  AppUser userById(String id) =>
+      findUser(id) ?? (throw StateError('找不到住民 $id'));
 
-  Circle circleById(String id) => _circles.firstWhere((c) => c.id == id);
+  Circle circleById(String id) =>
+      findCircle(id) ?? (throw StateError('找不到圈子 $id'));
 
-  Post postById(String id) => _posts.firstWhere((p) => p.id == id);
+  Post postById(String id) =>
+      findPost(id) ?? (throw StateError('找不到动态 $id'));
 
   Conversation conversationById(String id) =>
-      _conversations.firstWhere((c) => c.id == id);
+      findConversation(id) ?? (throw StateError('找不到会话 $id'));
+
+  AppUser? findUser(String id) {
+    for (final user in _users) {
+      if (user.id == id) {
+        return user;
+      }
+    }
+    return null;
+  }
+
+  Circle? findCircle(String id) {
+    for (final circle in _circles) {
+      if (circle.id == id) {
+        return circle;
+      }
+    }
+    return null;
+  }
+
+  Post? findPost(String id) {
+    for (final post in _posts) {
+      if (post.id == id) {
+        return post;
+      }
+    }
+    return null;
+  }
+
+  Conversation? findConversation(String id) {
+    for (final conversation in _conversations) {
+      if (conversation.id == id) {
+        return conversation;
+      }
+    }
+    return null;
+  }
 
   bool isFollowing(String userId) {
     try {
@@ -191,6 +232,8 @@ class AppState extends ChangeNotifier {
       return null;
     } on ApiException catch (error) {
       return error.message;
+    } catch (_) {
+      return '连不上次元服务器，请确认后端已启动，且开发环境地址对本平台有效。';
     }
   }
 
@@ -360,7 +403,12 @@ class AppState extends ChangeNotifier {
   }
 
   void _upsertConversation(Conversation conversation) {
-    _upsertUser(conversation.peer);
+    if (!conversation.isGroup) {
+      _upsertUser(conversation.peer);
+    }
+    for (final member in conversation.members) {
+      _upsertUser(member);
+    }
     final index = _conversations.indexWhere((item) => item.id == conversation.id);
     if (index < 0) {
       _conversations = [conversation, ..._conversations];
@@ -379,34 +427,49 @@ class AppState extends ChangeNotifier {
     if (api == null) {
       return;
     }
+    _feedError = null;
     try {
-      final results = await Future.wait([
-        api.listPosts(),
-        api.listCircles(),
-        api.listConversations(),
-        api.listNotices(),
-      ]);
-      for (final post in results[0] as List<Post>) {
+      final posts = await api.listPosts();
+      _posts = [];
+      for (final post in posts) {
         _upsertPost(post);
       }
-      _circles = results[1] as List<Circle>;
-      _conversations = results[2] as List<Conversation>;
-      _notices = results[3] as List<Notice>;
+      if (posts.isEmpty) {
+        _feedError = '广场还没有动态';
+      }
+    } catch (error) {
+      debugPrint('加载动态失败: $error');
+      _feedError = '动态加载失败，打开「网络」看看 /posts 响应';
+    }
+    try {
+      _circles = await api.listCircles();
+    } catch (error) {
+      debugPrint('加载圈子失败: $error');
+    }
+    try {
+      _conversations = await api.listConversations();
       for (final conversation in _conversations) {
         _upsertUser(conversation.peer);
       }
-    } on ApiException {
-      // 首页拉取失败时保留已有会话用户，面板里可看请求。
+    } catch (error) {
+      debugPrint('加载私信失败: $error');
+    }
+    try {
+      _notices = await api.listNotices();
+    } catch (error) {
+      debugPrint('加载通知失败: $error');
     }
   }
 
-  Future<void> logout() async {
+  Future<void> logout({bool notifyRemote = true}) async {
     final api = _api;
     if (api != null) {
-      try {
-        await api.logoutRemote();
-      } on ApiException {
-        // 本地仍退出。
+      if (notifyRemote) {
+        try {
+          await api.logoutRemote();
+        } on ApiException {
+          // 本地仍退出。
+        }
       }
       await api.clearTokens();
       _users = [];
@@ -414,6 +477,7 @@ class AppState extends ChangeNotifier {
       _posts = [];
       _conversations = [];
       _notices = [];
+      _feedError = null;
     }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_sessionKey);
@@ -592,8 +656,9 @@ class AppState extends ChangeNotifier {
     if (api != null) {
       try {
         final result = await api.toggleFollow(userId);
+        final existing = findUser(userId) ?? AppUser.placeholder(userId);
         _upsertUser(
-          userById(userId).copyWith(
+          existing.copyWith(
             isFollowing: result.isFollowing,
             followers: result.followers,
           ),
@@ -626,8 +691,9 @@ class AppState extends ChangeNotifier {
     if (api != null) {
       try {
         final result = await api.toggleJoinCircle(circleId);
+        final existing = findCircle(circleId) ?? Circle.preview(circleId);
         _upsertCircle(
-          circleById(circleId).copyWith(
+          existing.copyWith(
             joined: result.joined,
             memberCount: result.memberCount,
           ),
@@ -767,9 +833,9 @@ class AppState extends ChangeNotifier {
       final conversation = await api.createConversation(peerId);
       _upsertConversation(conversation);
       notifyListeners();
-      return conversationById(conversation.id);
+      return findConversation(conversation.id) ?? conversation;
     }
-    final existing = _conversations.where((item) => item.peerId == peerId);
+    final existing = _conversations.where((item) => !item.isGroup && item.peerId == peerId);
     if (existing.isNotEmpty) {
       return existing.first;
     }
@@ -781,6 +847,60 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     return created;
   }
+
+  Future<String?> createGroupChat({
+    required List<String> memberIds,
+    String title = '',
+  }) async {
+    final unique = [...{...memberIds.where((id) => id != _currentUserId)}];
+    if (unique.length < 2) {
+      return '拉群至少再邀请两位住民';
+    }
+    final api = _api;
+    if (api != null) {
+      try {
+        final conversation = await api.createGroup(memberIds: unique, title: title);
+        _upsertConversation(conversation);
+        notifyListeners();
+        return null;
+      } on ApiException catch (error) {
+        return error.message;
+      }
+    }
+    final meId = _currentUserId;
+    if (meId == null) {
+      return '请先登录';
+    }
+    final members = [userById(meId), ...unique.map(userById)];
+    final name = title.trim().isEmpty
+        ? members.take(3).map((user) => user.nickname).join('、')
+        : title.trim();
+    final created = Conversation(
+      id: _uuid.v4(),
+      kind: ConversationKind.group,
+      title: name,
+      ownerId: meId,
+      members: members,
+      peer: AppUser(
+        id: 'group_${members.length}',
+        nickname: name,
+        handle: '@group',
+        bio: '',
+        signature: '',
+        emoji: '🪐',
+        accentIndex: 6,
+        followers: 0,
+        following: 0,
+        level: 1,
+        badges: const ['群聊'],
+      ),
+    );
+    _conversations = [created, ..._conversations];
+    notifyListeners();
+    return null;
+  }
+
+  Conversation? lastCreatedConversation() => _conversations.isEmpty ? null : _conversations.first;
 
   Future<void> loadPostDetail(String postId) async {
     final api = _api;

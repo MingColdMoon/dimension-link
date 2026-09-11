@@ -393,6 +393,14 @@ Toggle。返回 `{ "joined": true, "memberCount": 12841 }`。
 
 已存在则返回已有会话，不新建。返回 `ConversationItem`。
 
+拉群：
+
+```json
+{ "memberIds": ["u_sakurai", "u_tsukimi"], "title": "漫展小队" }
+```
+
+`memberIds` 不含自己，至少两位。返回 `kind: "group"` 的 `ConversationItem`，含 `title`、`members`。群消息会给每位其他成员未读 +1。
+
 ### GET `/conversations/{id}/messages`
 
 分页，建议时间正序（聊天气泡从上到下）。校验当前用户是会话成员。

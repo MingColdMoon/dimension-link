@@ -35,7 +35,15 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final post = state.postById(widget.postId);
+    final post = state.findPost(widget.postId);
+    if (post == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('动态')),
+        body: const StarryBackdrop(
+          child: Center(child: EmptyHint(text: '正在把这条动态从次元里捞出来…')),
+        ),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('动态详情')),

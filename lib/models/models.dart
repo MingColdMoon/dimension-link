@@ -4,9 +4,84 @@ DateTime parseApiTime(dynamic raw) {
     return raw.toLocal();
   }
   if (raw is String && raw.isNotEmpty) {
-    return DateTime.parse(raw).toLocal();
+    return DateTime.tryParse(raw)?.toLocal() ?? DateTime.now();
+  }
+  if (raw is num) {
+    final value = raw.toInt();
+    if (value > 1000000000000) {
+      return DateTime.fromMillisecondsSinceEpoch(value, isUtc: true).toLocal();
+    }
+    if (value > 1000000000) {
+      return DateTime.fromMillisecondsSinceEpoch(value * 1000, isUtc: true).toLocal();
+    }
   }
   return DateTime.now();
+}
+
+int asInt(dynamic raw, [int fallback = 0]) {
+  if (raw is int) {
+    return raw;
+  }
+  if (raw is num) {
+    return raw.toInt();
+  }
+  if (raw is String) {
+    return int.tryParse(raw) ?? fallback;
+  }
+  return fallback;
+}
+
+bool asBool(dynamic raw, [bool fallback = false]) {
+  if (raw is bool) {
+    return raw;
+  }
+  if (raw is num) {
+    return raw != 0;
+  }
+  if (raw is String) {
+    switch (raw.trim().toLowerCase()) {
+      case 'true':
+      case '1':
+      case 'yes':
+        return true;
+      case 'false':
+      case '0':
+      case 'no':
+        return false;
+    }
+  }
+  return fallback;
+}
+
+String asString(dynamic raw, [String fallback = '']) {
+  if (raw == null) {
+    return fallback;
+  }
+  return raw.toString();
+}
+
+/// 兼容数组、逗号分隔字符串，避免 `badges`/`tags` 类型不对导致整条动态解析失败。
+List<String> asStringList(dynamic raw) {
+  if (raw is List) {
+    return [for (final item in raw) item.toString()];
+  }
+  if (raw is String && raw.trim().isNotEmpty) {
+    return raw
+        .split(RegExp(r'[,，]'))
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
+  }
+  return const [];
+}
+
+dynamic pick(Map<String, dynamic> json, List<String> keys) {
+  for (final key in keys) {
+    if (json.containsKey(key) && json[key] != null) {
+      return json[key];
+    }
+  }
+  return null;
 }
 
 Map<String, dynamic> asJsonMap(dynamic raw) {
@@ -27,6 +102,22 @@ List<Map<String, dynamic>> asJsonMapList(dynamic raw) {
     for (final item in raw)
       if (item is Map) Map<String, dynamic>.from(item),
   ];
+}
+
+/// 兼容 `data.items` / `data` 直接为数组 / `list` / `records` 等常见列表包法。
+List<Map<String, dynamic>> extractItems(dynamic data) {
+  if (data is List) {
+    return asJsonMapList(data);
+  }
+  if (data is Map) {
+    final map = asJsonMap(data);
+    for (final key in ['items', 'list', 'records', 'posts', 'rows', 'content', 'data']) {
+      if (map[key] is List) {
+        return asJsonMapList(map[key]);
+      }
+    }
+  }
+  return const [];
 }
 
 enum MoodTag {
@@ -82,26 +173,40 @@ class AppUser {
   final bool isFollowing;
 
   /// 从后端 `UserPublic` JSON 构造。
+  factory AppUser.placeholder(String id) {
+    return AppUser(
+      id: id,
+      nickname: '次元住民',
+      handle: '@user',
+      bio: '',
+      signature: '',
+      emoji: '✨',
+      accentIndex: 0,
+      followers: 0,
+      following: 0,
+      level: 1,
+      badges: const [],
+    );
+  }
+
   factory AppUser.fromJson(Map<String, dynamic> json) {
-    final handleRaw = (json['handle'] as String? ?? '').trim();
+    final handleRaw = asString(json['handle']).trim();
     final handle = handleRaw.startsWith('@') || handleRaw.isEmpty
         ? handleRaw
         : '@$handleRaw';
     return AppUser(
-      id: json['id'] as String? ?? '',
-      nickname: json['nickname'] as String? ?? '',
+      id: asString(json['id']),
+      nickname: asString(json['nickname']),
       handle: handle,
-      bio: json['bio'] as String? ?? '',
-      signature: json['signature'] as String? ?? '',
-      emoji: json['emoji'] as String? ?? '✨',
-      accentIndex: json['accentIndex'] as int? ?? 0,
-      followers: json['followers'] as int? ?? 0,
-      following: json['following'] as int? ?? 0,
-      level: json['level'] as int? ?? 1,
-      badges: [
-        for (final item in json['badges'] as List? ?? const []) item.toString(),
-      ],
-      isFollowing: json['isFollowing'] as bool? ?? false,
+      bio: asString(json['bio']),
+      signature: asString(json['signature']),
+      emoji: asString(json['emoji'], '✨'),
+      accentIndex: asInt(pick(json, ['accentIndex', 'accent_index'])),
+      followers: asInt(json['followers']),
+      following: asInt(json['following']),
+      level: asInt(json['level'], 1),
+      badges: asStringList(json['badges']),
+      isFollowing: asBool(pick(json, ['isFollowing', 'is_following'])),
     );
   }
 
@@ -150,10 +255,12 @@ class Comment {
 
   factory Comment.fromJson(Map<String, dynamic> json) {
     return Comment(
-      id: json['id'] as String? ?? '',
-      user: AppUser.fromJson(asJsonMap(json['user'])),
-      content: json['content'] as String? ?? '',
-      createdAt: parseApiTime(json['createdAt']),
+      id: asString(json['id']),
+      user: json['user'] is Map
+          ? AppUser.fromJson(asJsonMap(json['user']))
+          : AppUser.placeholder(asString(pick(json, ['userId', 'user_id']))),
+      content: asString(json['content']),
+      createdAt: parseApiTime(pick(json, ['createdAt', 'created_at'])),
     );
   }
 }
@@ -181,24 +288,35 @@ class Circle {
 
   factory Circle.fromJson(Map<String, dynamic> json) {
     return Circle(
-      id: json['id'] as String? ?? '',
-      name: json['name'] as String? ?? '',
-      emoji: json['emoji'] as String? ?? '',
-      desc: json['desc'] as String? ?? '',
-      memberCount: json['memberCount'] as int? ?? 0,
-      accentIndex: json['accentIndex'] as int? ?? 0,
-      tags: [
-        for (final item in json['tags'] as List? ?? const []) item.toString(),
-      ],
-      joined: json['joined'] as bool? ?? false,
+      id: asString(json['id']),
+      name: asString(json['name']),
+      emoji: asString(json['emoji']),
+      desc: asString(pick(json, ['desc', 'description'])),
+      memberCount: asInt(pick(json, ['memberCount', 'member_count'])),
+      accentIndex: asInt(pick(json, ['accentIndex', 'accent_index'])),
+      tags: asStringList(json['tags']),
+      joined: asBool(json['joined']),
     );
   }
 
-  factory Circle.preview(Map<String, dynamic> json) {
+  factory Circle.preview(dynamic raw, {String? fallbackId}) {
+    if (raw is Map) {
+      final json = asJsonMap(raw);
+      return Circle(
+        id: asString(json['id'], fallbackId ?? ''),
+        name: asString(json['name'], '圈子'),
+        emoji: asString(json['emoji'], '✦'),
+        desc: '',
+        memberCount: 0,
+        accentIndex: 0,
+        tags: const [],
+      );
+    }
+    final id = asString(raw, fallbackId ?? '');
     return Circle(
-      id: json['id'] as String? ?? '',
-      name: json['name'] as String? ?? '',
-      emoji: json['emoji'] as String? ?? '',
+      id: id,
+      name: '圈子',
+      emoji: '✦',
       desc: '',
       memberCount: 0,
       accentIndex: 0,
@@ -263,20 +381,25 @@ class Post {
     final comments = [
       for (final item in asJsonMapList(json['comments'])) Comment.fromJson(item),
     ];
+    final authorRaw = json['author'] ?? json['user'];
+    final author = authorRaw is Map
+        ? AppUser.fromJson(asJsonMap(authorRaw))
+        : AppUser.placeholder(asString(pick(json, ['authorId', 'author_id', 'userId']), 'unknown'));
+    final circleId = asString(pick(json, ['circleId', 'circle_id']));
     return Post(
-      id: json['id'] as String? ?? '',
-      author: AppUser.fromJson(asJsonMap(json['author'])),
-      content: json['content'] as String? ?? '',
-      createdAt: parseApiTime(json['createdAt']),
-      mood: MoodTag.fromKey(json['mood'] as String?),
-      circle: Circle.preview(asJsonMap(json['circle'])),
-      imageHue: json['imageHue'] as int? ?? 0,
-      imageTitle: json['imageTitle'] as String? ?? '今日速记',
-      liked: json['liked'] as bool? ?? false,
-      starred: json['starred'] as bool? ?? false,
-      likeCount: json['likeCount'] as int? ?? 0,
-      starCount: json['starCount'] as int? ?? 0,
-      commentCount: json['commentCount'] as int? ?? comments.length,
+      id: asString(pick(json, ['id', '_id'])),
+      author: author,
+      content: asString(pick(json, ['content', 'text', 'body'])),
+      createdAt: parseApiTime(pick(json, ['createdAt', 'created_at'])),
+      mood: MoodTag.fromKey(asString(json['mood'], 'happy')),
+      circle: Circle.preview(json['circle'], fallbackId: circleId),
+      imageHue: asInt(pick(json, ['imageHue', 'image_hue'])),
+      imageTitle: asString(pick(json, ['imageTitle', 'image_title']), '今日速记'),
+      liked: asBool(json['liked']),
+      starred: asBool(json['starred']),
+      likeCount: asInt(pick(json, ['likeCount', 'like_count'])),
+      starCount: asInt(pick(json, ['starCount', 'star_count'])),
+      commentCount: asInt(pick(json, ['commentCount', 'comment_count']), comments.length),
       comments: comments,
     );
   }
@@ -326,11 +449,20 @@ class ChatMessage {
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
-      id: json['id'] as String? ?? '',
-      senderId: json['senderId'] as String? ?? '',
-      text: json['text'] as String? ?? '',
-      createdAt: parseApiTime(json['createdAt']),
+      id: asString(json['id']),
+      senderId: asString(pick(json, ['senderId', 'sender_id'])),
+      text: asString(pick(json, ['text', 'content'])),
+      createdAt: parseApiTime(pick(json, ['createdAt', 'created_at'])),
     );
+  }
+}
+
+enum ConversationKind {
+  direct,
+  group;
+
+  static ConversationKind fromKey(String? key) {
+    return key == 'group' ? ConversationKind.group : ConversationKind.direct;
   }
 }
 
@@ -338,31 +470,76 @@ class Conversation {
   const Conversation({
     required this.id,
     required this.peer,
+    this.kind = ConversationKind.direct,
+    this.title = '',
+    this.ownerId,
+    this.members = const [],
     this.lastMessage,
     this.messages = const [],
     this.unread = 0,
   });
 
   final String id;
+  final ConversationKind kind;
+  final String title;
+  final String? ownerId;
+  final List<AppUser> members;
   final AppUser peer;
   final ChatMessage? lastMessage;
   final List<ChatMessage> messages;
   final int unread;
 
+  bool get isGroup => kind == ConversationKind.group;
   String get peerId => peer.id;
+  String get displayName => isGroup
+      ? (title.trim().isEmpty ? '群聊' : title.trim())
+      : peer.nickname;
+  String get displayEmoji => isGroup ? '🪐' : peer.emoji;
+  int get displayAccent => isGroup ? 6 : peer.accentIndex;
 
   factory Conversation.fromJson(Map<String, dynamic> json) {
     final last = json['lastMessage'];
+    final kind = ConversationKind.fromKey(asString(json['kind']));
+    final title = asString(json['title']);
+    final members = [
+      for (final item in asJsonMapList(json['members'])) AppUser.fromJson(item),
+    ];
+    final peer = json['peer'] is Map
+        ? AppUser.fromJson(asJsonMap(json['peer']))
+        : kind == ConversationKind.group
+            ? AppUser(
+                id: asString(json['id']),
+                nickname: title.trim().isEmpty ? '群聊' : title.trim(),
+                handle: '@group',
+                bio: '',
+                signature: '',
+                emoji: '🪐',
+                accentIndex: 6,
+                followers: 0,
+                following: 0,
+                level: 1,
+                badges: const ['群聊'],
+              )
+            : AppUser.placeholder(asString(pick(json, ['peerId', 'peer_id'])));
     return Conversation(
-      id: json['id'] as String? ?? '',
-      peer: AppUser.fromJson(asJsonMap(json['peer'])),
+      id: asString(json['id']),
+      kind: kind,
+      title: title,
+      ownerId: asString(pick(json, ['ownerId', 'owner_id'])).isEmpty
+          ? null
+          : asString(pick(json, ['ownerId', 'owner_id'])),
+      members: members,
+      peer: peer,
       lastMessage: last is Map ? ChatMessage.fromJson(asJsonMap(last)) : null,
-      unread: json['unread'] as int? ?? 0,
+      unread: asInt(json['unread']),
     );
   }
 
   Conversation copyWith({
     AppUser? peer,
+    ConversationKind? kind,
+    String? title,
+    List<AppUser>? members,
     ChatMessage? lastMessage,
     List<ChatMessage>? messages,
     int? unread,
@@ -370,6 +547,10 @@ class Conversation {
   }) {
     return Conversation(
       id: id,
+      kind: kind ?? this.kind,
+      title: title ?? this.title,
+      ownerId: ownerId,
+      members: members ?? this.members,
       peer: peer ?? this.peer,
       lastMessage: clearLastMessage ? null : (lastMessage ?? this.lastMessage),
       messages: messages ?? this.messages,
@@ -395,11 +576,11 @@ class Notice {
 
   factory Notice.fromJson(Map<String, dynamic> json) {
     return Notice(
-      id: json['id'] as String? ?? '',
-      title: json['title'] as String? ?? '',
-      body: json['body'] as String? ?? '',
-      createdAt: parseApiTime(json['createdAt']),
-      kind: json['kind'] as String? ?? 'badge',
+      id: asString(json['id']),
+      title: asString(json['title']),
+      body: asString(json['body']),
+      createdAt: parseApiTime(pick(json, ['createdAt', 'created_at'])),
+      kind: asString(json['kind'], 'badge'),
     );
   }
 }
@@ -436,10 +617,9 @@ class MeProfile {
   factory MeProfile.fromJson(Map<String, dynamic> json) {
     return MeProfile(
       user: AppUser.fromJson(json),
-      joinedCircleIds: [
-        for (final item in json['joinedCircleIds'] as List? ?? const [])
-          item.toString(),
-      ],
+      joinedCircleIds: asStringList(
+        pick(json, ['joinedCircleIds', 'joined_circle_ids']),
+      ),
     );
   }
 }

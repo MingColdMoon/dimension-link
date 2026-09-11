@@ -325,6 +325,41 @@ class MockSeed {
         messages: cv3Messages,
         lastMessage: cv3Messages.last,
       ),
+      Conversation(
+        id: 'cv_group',
+        kind: ConversationKind.group,
+        title: '漫展小队',
+        ownerId: meId,
+        members: [user(meId), user('u_sakurai'), user('u_tsukimi')],
+        peer: const AppUser(
+          id: 'cv_group',
+          nickname: '漫展小队',
+          handle: '@group',
+          bio: '',
+          signature: '',
+          emoji: '🪐',
+          accentIndex: 6,
+          followers: 0,
+          following: 0,
+          level: 1,
+          badges: ['群聊'],
+        ),
+        unread: 0,
+        messages: [
+          ChatMessage(
+            id: 'mg1',
+            senderId: 'u_sakurai',
+            text: '群建好啦，返图都丢这里～',
+            createdAt: _ago(hours: 3),
+          ),
+        ],
+        lastMessage: ChatMessage(
+          id: 'mg1',
+          senderId: 'u_sakurai',
+          text: '群建好啦，返图都丢这里～',
+          createdAt: _ago(hours: 3),
+        ),
+      ),
     ];
   }
 

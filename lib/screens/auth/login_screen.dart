@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../config/runtime_env.dart';
 import '../../state/app_state.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/cute_kit.dart';
@@ -91,6 +92,22 @@ class _LoginScreenState extends State<LoginScreen> {
                     const Text(
                       '演示账号：星野铃 / 123456',
                       style: TextStyle(color: AppColors.inkMuted, fontSize: 12),
+                    ),
+                    Builder(
+                      builder: (context) {
+                        try {
+                          final url = context.watch<RuntimeEnv>().apiBaseUrl;
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              '接口 $url',
+                              style: const TextStyle(color: AppColors.inkMuted, fontSize: 11),
+                            ),
+                          );
+                        } on ProviderNotFoundException {
+                          return const SizedBox.shrink();
+                        }
+                      },
                     ),
                   ],
                 ),

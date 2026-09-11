@@ -14,11 +14,13 @@ class NetworkInspectorOverlay extends StatelessWidget {
     required this.child,
     required this.store,
     required this.navigatorKey,
+    this.leadingTool,
   });
 
   final Widget child;
   final NetworkLogStore store;
   final GlobalKey<NavigatorState> navigatorKey;
+  final Widget? leadingTool;
 
   @override
   Widget build(BuildContext context) {
@@ -29,20 +31,30 @@ class NetworkInspectorOverlay extends StatelessWidget {
           left: 12,
           bottom: 96,
           child: SafeArea(
-            child: ListenableBuilder(
-              listenable: store,
-              builder: (context, _) {
-                return _InspectorFab(
-                  count: store.entries.length,
-                  onPressed: () {
-                    navigatorKey.currentState?.push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => NetworkLogPage(store: store),
-                      ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (leadingTool != null) ...[
+                  leadingTool!,
+                  const SizedBox(height: 8),
+                ],
+                ListenableBuilder(
+                  listenable: store,
+                  builder: (context, _) {
+                    return _InspectorFab(
+                      count: store.entries.length,
+                      onPressed: () {
+                        navigatorKey.currentState?.push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => NetworkLogPage(store: store),
+                          ),
+                        );
+                      },
                     );
                   },
-                );
-              },
+                ),
+              ],
             ),
           ),
         ),

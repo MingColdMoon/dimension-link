@@ -18,8 +18,8 @@ class AuthSession {
       throw const FormatException('登录响应缺少 user');
     }
     return AuthSession(
-      accessToken: json['accessToken'] as String? ?? '',
-      refreshToken: json['refreshToken'] as String? ?? '',
+      accessToken: asString(pick(json, ['accessToken', 'access_token'])),
+      refreshToken: asString(pick(json, ['refreshToken', 'refresh_token'])),
       user: AppUser.fromJson(Map<String, dynamic>.from(userRaw)),
     );
   }

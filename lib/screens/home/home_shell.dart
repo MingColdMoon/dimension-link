@@ -7,6 +7,7 @@ import '../community/community_screen.dart';
 import '../feed/compose_screen.dart';
 import '../feed/feed_screen.dart';
 import '../messages/messages_screen.dart';
+import '../messages/start_chat_screen.dart';
 import '../profile/profile_screen.dart';
 import '../search/search_screen.dart';
 
@@ -36,7 +37,17 @@ class HomeShell extends StatelessWidget {
               },
               child: const Icon(Icons.auto_awesome, color: Colors.white),
             )
-          : null,
+          : state.tabIndex == 2
+              ? FloatingActionButton(
+                  backgroundColor: AppColors.starPurple,
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const StartChatScreen(groupMode: true)),
+                    );
+                  },
+                  child: const Icon(Icons.groups_rounded, color: Colors.white),
+                )
+              : null,
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       bottomNavigationBar: _CuteNav(
         index: state.tabIndex,

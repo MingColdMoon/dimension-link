@@ -43,6 +43,54 @@ void main() {
     expect(post.circleId, 'c_cos');
   });
 
+  test('extractItems 兼容 data 直接为数组', () {
+    final items = extractItems([
+      {'id': 'p1', 'content': 'hello'},
+    ]);
+    expect(items, hasLength(1));
+    expect(items.first['id'], 'p1');
+    expect(extractItems({'items': [{'id': 'p2'}]}).first['id'], 'p2');
+    expect(extractItems({'list': [{'id': 'p3'}]}).first['id'], 'p3');
+  });
+
+  test('PostCard 兼容数字字符串、snake_case 与缺少嵌套对象', () {
+    final post = Post.fromJson({
+      'id': 12,
+      'authorId': 'u_sakurai',
+      'content': '有返回值就该看见我',
+      'created_at': '2026-09-08T10:00:00Z',
+      'mood': 'excited',
+      'circle_id': 'c_cos',
+      'like_count': '3',
+      'starCount': 1.0,
+      'liked': 1,
+      'starred': 'false',
+    });
+    expect(post.id, '12');
+    expect(post.author.id, 'u_sakurai');
+    expect(post.circle.id, 'c_cos');
+    expect(post.likeCount, 3);
+    expect(post.starCount, 1);
+    expect(post.liked, isTrue);
+    expect(post.starred, isFalse);
+    expect(post.content, '有返回值就该看见我');
+  });
+
+  test('PostCard 兼容 _id 与 badges 字符串', () {
+    final post = Post.fromJson({
+      '_id': 'mongo_1',
+      'content': '根级字段也能看见',
+      'author': {
+        'id': 'u1',
+        'nickname': '铃',
+        'handle': 'suzu',
+        'badges': '绘圈新人王,樱花祭签到',
+      },
+    });
+    expect(post.id, 'mongo_1');
+    expect(post.author.badges, ['绘圈新人王', '樱花祭签到']);
+  });
+
   test('CommentItem / ConversationItem / CircleItem 按接口文档解析', () {
     final comment = Comment.fromJson({
       'id': 'c1',
@@ -87,6 +135,21 @@ void main() {
     expect(conversation.peerId, 'u_sakurai');
     expect(conversation.lastMessage?.text, contains('西区'));
     expect(conversation.unread, 1);
+
+    final group = Conversation.fromJson({
+      'id': 'cvg',
+      'kind': 'group',
+      'title': '漫展小队',
+      'ownerId': 'u_me',
+      'members': [
+        {'id': 'u_me', 'nickname': '星野铃', 'handle': '@hoshi_suzu', 'emoji': '🎀'},
+        {'id': 'u_sakurai', 'nickname': '桜井澪', 'handle': '@mio_cos', 'emoji': '🌸'},
+      ],
+      'unread': 0,
+    });
+    expect(group.isGroup, isTrue);
+    expect(group.displayName, '漫展小队');
+    expect(group.members, hasLength(2));
 
     final circle = Circle.fromJson({
       'id': 'c_doujin',

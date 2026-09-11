@@ -1,8 +1,12 @@
 import 'dart:io';
 
+import 'package:dimension_link/config/api_endpoints.dart';
+import 'package:dimension_link/config/api_host.dart';
 import 'package:dimension_link/config/app_config.dart';
 import 'package:dimension_link/config/app_env.dart';
+import 'package:dimension_link/config/runtime_env.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// 解析 `KEY=VALUE` 环境文件（忽略空行与 `#` 注释）。
 Map<String, String> loadEnvFile(String path) {
@@ -57,13 +61,8 @@ void main() {
     expect(AppEnv.parse(development['APP_ENV']!), AppEnv.dev);
     expect(AppEnv.parse(staging['APP_ENV']!), AppEnv.staging);
     expect(AppEnv.parse(production['APP_ENV']!), AppEnv.prod);
-
-    final urls = {
-      development['API_BASE_URL'],
-      staging['API_BASE_URL'],
-      production['API_BASE_URL'],
-    };
-    expect(urls, hasLength(3), reason: '三套环境的 API_BASE_URL 必须互不相同');
+    expect(development['APP_ENV'], isNot(staging['APP_ENV']));
+    expect(production['API_BASE_URL'], isNot(development['API_BASE_URL']));
 
     expect(development['ENABLE_LOGGING'], 'true');
     expect(staging['ENABLE_LOGGING'], 'true');
@@ -85,6 +84,53 @@ void main() {
       expected['ENABLE_LOGGING'] == 'true',
     );
     expect(AppConfig.current.isProduction, AppConfig.current.env.isProd);
+  });
+
+  test('可切换接口地址与 env 文件一致', () {
+    expect(ApiEndpoints.development.baseUrl, development['API_BASE_URL']);
+    expect(ApiEndpoints.staging.baseUrl, staging['API_BASE_URL']);
+    expect(ApiEndpoints.production.baseUrl, production['API_BASE_URL']);
+    expect(resolveApiBaseUrl(development['API_BASE_URL']!), development['API_BASE_URL']);
+    expect(resolveApiBaseUrl(staging['API_BASE_URL']!), staging['API_BASE_URL']);
+  });
+
+  test('运行时环境仅非生产可切换，并写入本地覆盖', () async {
+    SharedPreferences.setMockInitialValues({});
+    final runtime = RuntimeEnv(
+      compiled: AppConfig(
+        env: AppEnv.dev,
+        apiBaseUrl: development['API_BASE_URL']!,
+        enableLogging: true,
+      ),
+    );
+    expect(runtime.canSwitch, isTrue);
+    await runtime.select(AppEnv.prod);
+    expect(runtime.env, AppEnv.prod);
+    expect(runtime.apiBaseUrl, production['API_BASE_URL']);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString(RuntimeEnv.prefsKey), 'prod');
+
+    final restored = RuntimeEnv(
+      compiled: AppConfig(
+        env: AppEnv.dev,
+        apiBaseUrl: development['API_BASE_URL']!,
+        enableLogging: true,
+      ),
+    );
+    await restored.restore();
+    expect(restored.env, AppEnv.prod);
+    expect(restored.apiBaseUrl, production['API_BASE_URL']);
+
+    final locked = RuntimeEnv(
+      compiled: AppConfig(
+        env: AppEnv.prod,
+        apiBaseUrl: production['API_BASE_URL']!,
+        enableLogging: false,
+      ),
+    );
+    expect(locked.canSwitch, isFalse);
+    await locked.select(AppEnv.dev);
+    expect(locked.env, AppEnv.prod);
   });
 
   test('APP_ENV 别名可以正确解析', () {

@@ -24,7 +24,7 @@ class StarryBackdrop extends StatelessWidget {
       ),
       child: Stack(
         children: [
-          const Positioned.fill(child: _SparkleField()),
+          const Positioned.fill(child: IgnorePointer(child: _SparkleField())),
           child,
         ],
       ),

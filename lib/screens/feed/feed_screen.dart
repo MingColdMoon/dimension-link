@@ -48,11 +48,20 @@ class FeedScreen extends StatelessWidget {
             ),
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 108),
-              sliver: SliverList.separated(
-                itemCount: state.posts.length,
-                separatorBuilder: (context, index) => const SizedBox(height: 12),
-                itemBuilder: (context, index) => PostCard(post: state.posts[index]),
-              ),
+              sliver: state.posts.isEmpty
+                  ? SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 48),
+                        child: EmptyHint(
+                          text: state.feedError ?? '广场还没有动态，去发布第一条吧。',
+                        ),
+                      ),
+                    )
+                  : SliverList.separated(
+                      itemCount: state.posts.length,
+                      separatorBuilder: (context, index) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) => PostCard(post: state.posts[index]),
+                    ),
             ),
           ],
         ),

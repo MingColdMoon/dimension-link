@@ -36,12 +36,31 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final cv = state.conversationById(widget.conversationId);
-    final peer = cv.peer;
+    final cv = state.findConversation(widget.conversationId);
+    if (cv == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('私信')),
+        body: const StarryBackdrop(
+          child: Center(child: EmptyHint(text: '正在打开这条私信…')),
+        ),
+      );
+    }
     final meId = state.currentUserId;
 
     return Scaffold(
-      appBar: AppBar(title: Text(peer.nickname)),
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(cv.displayName),
+            if (cv.isGroup)
+              Text(
+                cv.members.map((user) => user.nickname).join('、'),
+                style: const TextStyle(fontSize: 12, color: AppColors.inkMuted),
+              ),
+          ],
+        ),
+      ),
       body: StarryBackdrop(
         child: Column(
           children: [
@@ -53,6 +72,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 itemBuilder: (context, index) {
                   final msg = cv.messages[index];
                   final mine = msg.senderId == meId;
+                  final sender = state.findUser(msg.senderId);
                   return Align(
                     alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
                     child: Container(
@@ -69,9 +89,22 @@ class _ChatScreenState extends State<ChatScreen> {
                           bottomRight: Radius.circular(mine ? 4 : 18),
                         ),
                       ),
-                      child: Text(
-                        msg.text,
-                        style: TextStyle(color: mine ? Colors.white : AppColors.ink),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (cv.isGroup && !mine)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: Text(
+                                sender?.nickname ?? '住民',
+                                style: const TextStyle(fontSize: 11, color: AppColors.inkMuted),
+                              ),
+                            ),
+                          Text(
+                            msg.text,
+                            style: TextStyle(color: mine ? Colors.white : AppColors.ink),
+                          ),
+                        ],
                       ),
                     ),
                   );

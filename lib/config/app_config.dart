@@ -27,7 +27,7 @@ class AppConfig {
   );
   static const String _apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://172.28.0.1:8080/v1',
+    defaultValue: 'http://127.0.0.1:8080/v1',
   );
   static const bool _enableLogging = bool.fromEnvironment(
     'ENABLE_LOGGING',

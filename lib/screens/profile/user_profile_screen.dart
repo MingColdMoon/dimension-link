@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../network/api_exception.dart';
 import '../../state/app_state.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/cute_kit.dart';
@@ -28,7 +29,15 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final user = state.userById(widget.userId);
+    final user = state.findUser(widget.userId);
+    if (user == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('住民')),
+        body: const StarryBackdrop(
+          child: Center(child: EmptyHint(text: '正在穿越到这位住民的主页…')),
+        ),
+      );
+    }
     final posts = state.postsOfUser(widget.userId);
     final isMe = state.currentUserId == widget.userId;
     final following = user.isFollowing;
@@ -62,15 +71,24 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                         Expanded(
                           child: OutlinedButton(
                             onPressed: () async {
-                              final cv = await context.read<AppState>().ensureConversation(widget.userId);
-                              if (!context.mounted) {
-                                return;
+                              try {
+                                final cv = await context.read<AppState>().ensureConversation(widget.userId);
+                                if (!context.mounted) {
+                                  return;
+                                }
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => ChatScreen(conversationId: cv.id),
+                                  ),
+                                );
+                              } on ApiException catch (error) {
+                                if (!context.mounted) {
+                                  return;
+                                }
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(error.message)),
+                                );
                               }
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => ChatScreen(conversationId: cv.id),
-                                ),
-                              );
                             },
                             child: const Text('发私信'),
                           ),
