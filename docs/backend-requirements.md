@@ -19,7 +19,7 @@
 
 成功标准：
 
-1. 现有 5 个 Tab / 页面流（启动 → 登录/注册 → 广场 / 圈子 / 消息 / 我的 / 搜索）都能打到后端。
+1. 现有 Tab / 页面流（启动 → 登录/注册 → 广场 / 圈子 / 匹配 / 消息 / 我的 / 搜索）都能打到后端。
 2. `AppState` 中每一类写操作都有对应接口（见第 6 节对照表）。
 3. 种子住民、圈子、动态可导入，便于联调（演示账号 `星野铃` 仍可登录）。
 
@@ -37,6 +37,7 @@
 - 私信会话列表、确保会话、发消息、已读
 - 系统通知列表
 - 搜索住民、动态、圈子
+- 次元匹配：按附近 / 同好 / 默契推荐住民，心动后可关注并进入私信
 
 配图在客户端用 `imageHue` + `imageTitle` 画插画卡，**本期不强制真实图片存储**，但字段必须持久化，便于以后换成 URL。
 
@@ -80,6 +81,7 @@ P1 建议在接口上预留分页、`avatarUrl`、`imageUrl`，避免下次大�
 | 编辑资料 | `edit_profile_screen.dart` | 更新 nickname / bio / signature |
 | 他人主页 | `user_profile_screen.dart` | 资料、是否已关注、关注、发起私信、其动态 |
 | 搜索 | `search_screen.dart` | 同时搜用户、圈子、动态 |
+| 次元匹配 | `match_screen.dart` | 按 `mode=nearby|hobby|affinity` 推荐住民；心动写入；无接口时客户端本地推荐 |
 
 底部导航未读数 = 所有会话 `unread` 之和。
 
@@ -266,6 +268,11 @@ P1 建议在接口上预留分页、`avatarUrl`、`imageUrl`，避免下次大�
 | `toggleFollow` | POST `/v1/users/{id}/follow` |
 | `toggleJoinCircle` | POST `/v1/circles/{id}/join` |
 | `sendMessage` | POST `/v1/conversations/{id}/messages` |
+| `sendChatImage` | POST `/v1/conversations/{id}/messages`（`kind=image`） |
+| `setGroupAdmin` | POST/DELETE `/v1/conversations/{id}/admins` |
+| `setGroupMute` | POST `/v1/conversations/{id}/mute` |
+| `kickGroupMember` | POST `/v1/conversations/{id}/kick` |
+| `leaveGroup` | POST `/v1/conversations/{id}/leave` |
 | `markConversationRead` | POST `/v1/conversations/{id}/read` |
 | `updateProfile` | PATCH `/v1/me` |
 | `ensureConversation` | POST `/v1/conversations` |

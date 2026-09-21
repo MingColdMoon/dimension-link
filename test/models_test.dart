@@ -150,6 +150,61 @@ void main() {
     expect(group.isGroup, isTrue);
     expect(group.displayName, '漫展小队');
     expect(group.members, hasLength(2));
+    expect(group.isOwner('u_me'), isTrue);
+    expect(group.canSpeak('u_me'), isTrue);
+
+    final muted = Conversation.fromJson({
+      'id': 'cvg2',
+      'kind': 'group',
+      'title': '禁言测试',
+      'ownerId': 'u_me',
+      'adminIds': ['u_sakurai'],
+      'mutedUserIds': ['u_tsukimi'],
+      'groupMuted': true,
+      'members': [
+        {'id': 'u_me', 'nickname': '星野铃', 'handle': '@hoshi_suzu', 'emoji': '🎀'},
+        {'id': 'u_tsukimi', 'nickname': '月见黑', 'handle': '@kuro', 'emoji': '🌙'},
+      ],
+    });
+    expect(muted.canSpeak('u_tsukimi'), isFalse);
+    expect(muted.canSpeak('u_sakurai'), isTrue);
+
+    final mutedAdmin = Conversation.fromJson({
+      'id': 'cvg3',
+      'kind': 'group',
+      'title': '禁言管理员',
+      'ownerId': 'u_me',
+      'adminIds': ['u_sakurai'],
+      'mutedUserIds': ['u_sakurai'],
+      'groupMuted': false,
+      'members': [
+        {'id': 'u_me', 'nickname': '星野铃', 'handle': '@hoshi_suzu', 'emoji': '🎀'},
+        {'id': 'u_sakurai', 'nickname': '桜井澪', 'handle': '@mio_cos', 'emoji': '🌸'},
+      ],
+    });
+    expect(mutedAdmin.canSpeak('u_sakurai'), isFalse);
+    expect(mutedAdmin.canSpeak('u_me'), isTrue);
+
+    final image = ChatMessage.fromJson({
+      'id': 'mi',
+      'senderId': 'u_me',
+      'text': '樱色舞台',
+      'kind': 'image',
+      'imageUrl': 'illustration:330',
+      'createdAt': '2026-09-08T13:20:00Z',
+    });
+    expect(image.isImage, isTrue);
+    expect(image.preview, contains('[图片]'));
+
+    final system = ChatMessage.fromJson({
+      'id': 'ms',
+      'senderId': 'system',
+      'text': '开启了全员禁言',
+      'kind': 'system',
+      'createdAt': '2026-09-08T13:20:00Z',
+    });
+    expect(system.isSystem, isTrue);
+    expect(system.preview, '开启了全员禁言');
 
     final circle = Circle.fromJson({
       'id': 'c_doujin',
@@ -163,5 +218,48 @@ void main() {
     });
     expect(circle.joined, isTrue);
     expect(circle.tags, ['乙女']);
+  });
+
+  test('MatchCandidate 按接口文档解析', () {
+    final candidate = MatchCandidate.fromJson({
+      'user': {
+        'id': 'u_yukimi',
+        'nickname': '雪见白',
+        'handle': '@yukimi_shiro',
+        'bio': '水彩插画练习生',
+        'signature': '纸面上的雪不会化。',
+        'emoji': '❄️',
+        'accentIndex': 4,
+        'followers': 2100,
+        'following': 180,
+        'level': 16,
+        'badges': ['绘圈同好'],
+        'city': '上海',
+        'hobbies': ['插画', '同人'],
+      },
+      'mode': 'nearby',
+      'score': 92,
+      'distanceKm': '0.5',
+      'city': '上海',
+      'district': '徐汇',
+      'hobbies': ['插画', '水彩', '同人'],
+      'sharedHobbies': ['插画', '同人'],
+      'reason': '信号几乎叠在一起',
+      'online': true,
+    });
+    expect(candidate.userId, 'u_yukimi');
+    expect(candidate.mode, MatchMode.nearby);
+    expect(candidate.score, 92);
+    expect(candidate.distanceKm, 0.5);
+    expect(candidate.sharedHobbies, ['插画', '同人']);
+    expect(candidate.online, isTrue);
+    expect(candidate.isResonance, isTrue);
+    expect(candidate.borderTier, MatchBorderTier.red);
+    expect(candidate.distanceLabel, contains('500m'));
+    expect(candidate.shortDistanceLabel, '500m');
+    expect(MatchBorderTier.fromScore(49), MatchBorderTier.white);
+    expect(MatchBorderTier.fromScore(50), MatchBorderTier.purple);
+    expect(MatchBorderTier.fromScore(70), MatchBorderTier.gold);
+    expect(MatchBorderTier.fromScore(85), MatchBorderTier.red);
   });
 }

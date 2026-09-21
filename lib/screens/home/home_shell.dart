@@ -6,6 +6,7 @@ import '../../theme/app_colors.dart';
 import '../community/community_screen.dart';
 import '../feed/compose_screen.dart';
 import '../feed/feed_screen.dart';
+import '../match/match_screen.dart';
 import '../messages/messages_screen.dart';
 import '../messages/start_chat_screen.dart';
 import '../profile/profile_screen.dart';
@@ -20,6 +21,7 @@ class HomeShell extends StatelessWidget {
     final pages = const [
       FeedScreen(),
       CommunityScreen(),
+      MatchScreen(),
       MessagesScreen(),
       ProfileScreen(),
     ];
@@ -27,27 +29,29 @@ class HomeShell extends StatelessWidget {
     return Scaffold(
       extendBody: true,
       body: IndexedStack(index: state.tabIndex, children: pages),
-      floatingActionButton: state.tabIndex == 0
-          ? FloatingActionButton(
-              backgroundColor: AppColors.sakura,
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ComposeScreen()),
-                );
-              },
-              child: const Icon(Icons.auto_awesome, color: Colors.white),
-            )
-          : state.tabIndex == 2
-              ? FloatingActionButton(
-                  backgroundColor: AppColors.starPurple,
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const StartChatScreen(groupMode: true)),
-                    );
-                  },
-                  child: const Icon(Icons.groups_rounded, color: Colors.white),
-                )
-              : null,
+      floatingActionButton: switch (state.tabIndex) {
+        0 => FloatingActionButton(
+            heroTag: 'compose-fab',
+            backgroundColor: AppColors.sakura,
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ComposeScreen()),
+              );
+            },
+            child: const Icon(Icons.auto_awesome, color: Colors.white),
+          ),
+        3 => FloatingActionButton(
+            heroTag: 'group-chat-fab',
+            backgroundColor: AppColors.starPurple,
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const StartChatScreen(groupMode: true)),
+              );
+            },
+            child: const Icon(Icons.groups_rounded, color: Colors.white),
+          ),
+        _ => null,
+      },
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       bottomNavigationBar: _CuteNav(
         index: state.tabIndex,
@@ -80,7 +84,7 @@ class _CuteNav extends StatelessWidget {
   Widget build(BuildContext context) {
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.94),
@@ -94,19 +98,20 @@ class _CuteNav extends StatelessWidget {
             ],
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
             child: Row(
               children: [
                 _NavItem(icon: Icons.home_rounded, label: '广场', selected: index == 0, onTap: () => onTap(0)),
                 _NavItem(icon: Icons.diversity_1, label: '圈子', selected: index == 1, onTap: () => onTap(1)),
+                _NavItem(icon: Icons.auto_awesome, label: '匹配', selected: index == 2, onTap: () => onTap(2)),
                 _NavItem(
                   icon: Icons.chat_bubble_rounded,
                   label: '消息',
-                  selected: index == 2,
+                  selected: index == 3,
                   badge: unread,
-                  onTap: () => onTap(2),
+                  onTap: () => onTap(3),
                 ),
-                _NavItem(icon: Icons.person_rounded, label: '我的', selected: index == 3, onTap: () => onTap(3)),
+                _NavItem(icon: Icons.person_rounded, label: '我的', selected: index == 4, onTap: () => onTap(4)),
                 IconButton(
                   onPressed: onSearch,
                   icon: const Icon(Icons.search_rounded, color: AppColors.starPurple),
@@ -176,7 +181,7 @@ class _NavItem extends StatelessWidget {
               Text(
                 label,
                 style: TextStyle(
-                  fontSize: 11,
+                  fontSize: 10,
                   color: selected ? AppColors.sakura : AppColors.inkMuted,
                 ),
               ),

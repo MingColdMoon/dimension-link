@@ -105,7 +105,7 @@ class MessagesScreen extends StatelessWidget {
                               style: const TextStyle(fontSize: 16),
                             ),
                             Text(
-                              last?.text ?? (cv.isGroup ? '群已经建好，打个招呼吧' : '还没有对话'),
+                              last?.preview ?? (cv.isGroup ? '群已经建好，打个招呼吧' : '还没有对话'),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(color: AppColors.inkMuted),

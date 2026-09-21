@@ -479,4 +479,104 @@ void main() {
     expect(group.displayName, '漫展小队');
     expect(group.members, hasLength(3));
   });
+
+  test('设管理员会 POST /conversations/{id}/admins', () async {
+    final adapter = _ScriptedAdapter((options) {
+      expect(options.method, 'POST');
+      expect(options.path, '/conversations/cv_group/admins');
+      return jsonBody(200, {
+        'code': 0,
+        'message': 'ok',
+        'data': {
+          'id': 'cv_group',
+          'kind': 'group',
+          'title': '漫展小队',
+          'ownerId': 'u_me',
+          'adminIds': ['u_sakurai'],
+          'mutedUserIds': [],
+          'groupMuted': false,
+          'members': [
+            sampleUser(id: 'u_me', nickname: '星野铃'),
+            sampleUser(id: 'u_sakurai', nickname: '桜井澪'),
+          ],
+          'unread': 0,
+        },
+      });
+    });
+    final dio = Dio(BaseOptions(baseUrl: AppConfig.current.apiBaseUrl))
+      ..httpClientAdapter = adapter;
+    final api = ApiClient(dio: dio, logStore: NetworkLogStore());
+    final group = await api.setGroupAdmin('cv_group', 'u_sakurai');
+    expect(jsonDecode(adapter.lastBody!), {'userId': 'u_sakurai'});
+    expect(group.adminIds, ['u_sakurai']);
+  });
+
+  test('发图片会 POST kind=image', () async {
+    final adapter = _ScriptedAdapter((options) {
+      expect(options.path, '/conversations/cv_group/messages');
+      return jsonBody(200, {
+        'code': 0,
+        'message': 'ok',
+        'data': {
+          'id': 'm_img',
+          'senderId': 'u_me',
+          'text': '樱色舞台',
+          'kind': 'image',
+          'imageUrl': 'illustration:330',
+          'createdAt': '2026-09-08T13:20:00Z',
+        },
+      });
+    });
+    final dio = Dio(BaseOptions(baseUrl: AppConfig.current.apiBaseUrl))
+      ..httpClientAdapter = adapter;
+    final api = ApiClient(dio: dio, logStore: NetworkLogStore());
+    final message = await api.sendMessage(
+      'cv_group',
+      text: '樱色舞台',
+      kind: 'image',
+      imageUrl: 'illustration:330',
+    );
+    expect(jsonDecode(adapter.lastBody!), {
+      'text': '樱色舞台',
+      'kind': 'image',
+      'imageUrl': 'illustration:330',
+    });
+    expect(message.isImage, isTrue);
+    expect(message.imageUrl, 'illustration:330');
+  });
+
+  test('GET /match/recommend 能解析推荐住民', () async {
+    final adapter = _ScriptedAdapter((options) {
+      expect(options.path, '/match/recommend');
+      expect(options.queryParameters['mode'], 'nearby');
+      return jsonBody(200, {
+        'code': 0,
+        'message': 'ok',
+        'data': {
+          'items': [
+            {
+              'user': sampleUser(id: 'u_yukimi', nickname: '雪见白'),
+              'mode': 'nearby',
+              'score': 90,
+              'distanceKm': 0.4,
+              'city': '上海',
+              'district': '徐汇',
+              'hobbies': ['插画'],
+              'sharedHobbies': ['插画'],
+              'reason': '就在附近',
+              'online': true,
+            },
+          ],
+        },
+      });
+    });
+    final dio = Dio(BaseOptions(baseUrl: AppConfig.current.apiBaseUrl))
+      ..httpClientAdapter = adapter;
+    final api = ApiClient(dio: dio, logStore: NetworkLogStore());
+    final items = await api.listMatchRecommendations('nearby');
+    expect(items, hasLength(1));
+    expect(items.first.user.nickname, '雪见白');
+    expect(items.first.score, 90);
+    expect(items.first.distanceKm, 0.4);
+  });
 }

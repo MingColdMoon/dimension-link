@@ -285,14 +285,78 @@ class ApiClient {
     );
   }
 
-  Future<ChatMessage> sendMessage(String conversationId, String text) async {
+  Future<Conversation> getConversation(String conversationId) async {
+    return Conversation.fromJson(await _request('GET', '/conversations/$conversationId'));
+  }
+
+  Future<ChatMessage> sendMessage(
+    String conversationId, {
+    String? text,
+    String kind = 'text',
+    String? imageUrl,
+    String? imageBase64,
+    String? mimeType,
+  }) async {
     return ChatMessage.fromJson(
       await _request(
         'POST',
         '/conversations/$conversationId/messages',
-        data: {'text': text},
+        data: {
+          if (text != null) 'text': text,
+          'kind': kind,
+          if (imageUrl != null) 'imageUrl': imageUrl,
+          if (imageBase64 != null) 'imageBase64': imageBase64,
+          if (mimeType != null) 'mimeType': mimeType,
+        },
       ),
     );
+  }
+
+  Future<Conversation> setGroupAdmin(String conversationId, String userId) async {
+    return Conversation.fromJson(
+      await _request(
+        'POST',
+        '/conversations/$conversationId/admins',
+        data: {'userId': userId},
+      ),
+    );
+  }
+
+  Future<Conversation> removeGroupAdmin(String conversationId, String userId) async {
+    return Conversation.fromJson(
+      await _request('DELETE', '/conversations/$conversationId/admins/$userId'),
+    );
+  }
+
+  Future<Conversation> setGroupMute(
+    String conversationId, {
+    String? userId,
+    required bool muted,
+  }) async {
+    return Conversation.fromJson(
+      await _request(
+        'POST',
+        '/conversations/$conversationId/mute',
+        data: {
+          if (userId != null) 'userId': userId,
+          'muted': muted,
+        },
+      ),
+    );
+  }
+
+  Future<Conversation> kickGroupMember(String conversationId, String userId) async {
+    return Conversation.fromJson(
+      await _request(
+        'POST',
+        '/conversations/$conversationId/kick',
+        data: {'userId': userId},
+      ),
+    );
+  }
+
+  Future<void> leaveGroup(String conversationId) async {
+    await _request('POST', '/conversations/$conversationId/leave');
   }
 
   Future<int> markConversationRead(String conversationId) async {
@@ -308,6 +372,19 @@ class ApiClient {
     return SearchResult.fromJson(
       await _request('GET', '/search', query: {'q': query, 'limit': 50}),
     );
+  }
+
+  /// AI 次元匹配。后端未上线时由 [AppState] 回退到本地推荐。
+  Future<List<MatchCandidate>> listMatchRecommendations(String mode) {
+    return _getItems(
+      '/match/recommend',
+      MatchCandidate.fromJson,
+      query: {'mode': mode, 'limit': 20},
+    );
+  }
+
+  Future<void> likeMatch(String userId) async {
+    await _request('POST', '/match/$userId/like');
   }
 
   Future<List<T>> _getItems<T>(

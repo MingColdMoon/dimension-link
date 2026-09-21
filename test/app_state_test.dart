@@ -67,4 +67,54 @@ void main() {
     expect(sendErr, isNull);
     expect(state.conversationById(group.id).lastMessage?.text, '群建好了，来集合');
   });
+
+  test('群主可以设管理、禁言、踢人、发图片，退群会把群主交出去', () async {
+    final state = AppState();
+    await state.login('星野铃', '123456');
+    final group = state.conversationById('cv_group');
+    expect(group.isOwner(state.me.id), isTrue);
+    expect(group.isAdmin('u_sakurai'), isTrue);
+
+    expect(await state.setGroupAdmin(group.id, 'u_tsukimi', admin: true), isNull);
+    expect(state.conversationById(group.id).isAdmin('u_tsukimi'), isTrue);
+
+    expect(await state.setGroupMute(group.id, userId: 'u_tsukimi', muted: true), isNull);
+    expect(state.conversationById(group.id).isMemberMuted('u_tsukimi'), isTrue);
+
+    expect(await state.setGroupMute(group.id, muted: true), isNull);
+    expect(state.conversationById(group.id).groupMuted, isTrue);
+    expect(state.conversationById(group.id).canSpeak(state.me.id), isTrue);
+
+    expect(await state.sendChatImage(group.id, imageUrl: 'illustration:330', caption: '樱色舞台'), isNull);
+    expect(state.conversationById(group.id).lastMessage?.isImage, isTrue);
+    expect(state.conversationById(group.id).lastMessage?.preview, contains('[图片]'));
+
+    expect(await state.kickGroupMember(group.id, 'u_tsukimi'), isNull);
+    expect(state.conversationById(group.id).members.any((user) => user.id == 'u_tsukimi'), isFalse);
+
+    expect(await state.leaveGroup(group.id), isNull);
+    expect(state.findConversation(group.id), isNull);
+  });
+
+  test('被禁言的普通成员发不了言', () async {
+    final state = AppState();
+    await state.login('星野铃', '123456');
+    await state.setGroupMute('cv_group', userId: 'u_tsukimi', muted: true);
+    await state.logout();
+    await state.login('月见黑', '123456');
+    final err = await state.sendMessage('cv_group', '我还能说话吗');
+    expect(err, '你已被禁言');
+  });
+
+  test('被单独禁言的管理员也发不了言', () async {
+    final state = AppState();
+    await state.login('星野铃', '123456');
+    expect(await state.setGroupMute('cv_group', userId: 'u_sakurai', muted: true), isNull);
+    expect(state.conversationById('cv_group').isAdmin('u_sakurai'), isTrue);
+    expect(state.conversationById('cv_group').isMemberMuted('u_sakurai'), isTrue);
+    await state.logout();
+    await state.login('桜井澪', '123456');
+    final err = await state.sendMessage('cv_group', '管理被禁了吗');
+    expect(err, '你已被禁言');
+  });
 }

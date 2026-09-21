@@ -60,6 +60,19 @@ String asString(dynamic raw, [String fallback = '']) {
   return raw.toString();
 }
 
+double asDouble(dynamic raw, [double fallback = 0]) {
+  if (raw is double) {
+    return raw;
+  }
+  if (raw is num) {
+    return raw.toDouble();
+  }
+  if (raw is String) {
+    return double.tryParse(raw) ?? fallback;
+  }
+  return fallback;
+}
+
 /// 兼容数组、逗号分隔字符串，避免 `badges`/`tags` 类型不对导致整条动态解析失败。
 List<String> asStringList(dynamic raw) {
   if (raw is List) {
@@ -156,6 +169,9 @@ class AppUser {
     required this.badges,
     this.password,
     this.isFollowing = false,
+    this.city = '',
+    this.district = '',
+    this.hobbies = const [],
   });
 
   final String id;
@@ -171,6 +187,9 @@ class AppUser {
   final List<String> badges;
   final String? password;
   final bool isFollowing;
+  final String city;
+  final String district;
+  final List<String> hobbies;
 
   /// 从后端 `UserPublic` JSON 构造。
   factory AppUser.placeholder(String id) {
@@ -207,6 +226,9 @@ class AppUser {
       level: asInt(json['level'], 1),
       badges: asStringList(json['badges']),
       isFollowing: asBool(pick(json, ['isFollowing', 'is_following'])),
+      city: asString(json['city']),
+      district: asString(json['district']),
+      hobbies: asStringList(json['hobbies']),
     );
   }
 
@@ -219,6 +241,9 @@ class AppUser {
     int? following,
     int? level,
     bool? isFollowing,
+    String? city,
+    String? district,
+    List<String>? hobbies,
   }) {
     return AppUser(
       id: id,
@@ -234,6 +259,9 @@ class AppUser {
       badges: badges,
       password: password,
       isFollowing: isFollowing ?? this.isFollowing,
+      city: city ?? this.city,
+      district: district ?? this.district,
+      hobbies: hobbies ?? this.hobbies,
     );
   }
 }
@@ -434,18 +462,49 @@ class Post {
   }
 }
 
+enum MessageKind {
+  text,
+  image,
+  system;
+
+  static MessageKind fromKey(String? key) {
+    return switch (key) {
+      'image' => MessageKind.image,
+      'system' => MessageKind.system,
+      _ => MessageKind.text,
+    };
+  }
+}
+
 class ChatMessage {
   const ChatMessage({
     required this.id,
     required this.senderId,
     required this.text,
     required this.createdAt,
+    this.kind = MessageKind.text,
+    this.imageUrl = '',
   });
 
   final String id;
   final String senderId;
   final String text;
   final DateTime createdAt;
+  final MessageKind kind;
+  final String imageUrl;
+
+  bool get isImage => kind == MessageKind.image && imageUrl.isNotEmpty;
+  bool get isSystem => kind == MessageKind.system || senderId == 'system';
+
+  String get preview {
+    if (isSystem) {
+      return text;
+    }
+    if (isImage) {
+      return text.isEmpty || text == '[图片]' ? '[图片]' : '[图片] $text';
+    }
+    return text;
+  }
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
@@ -453,6 +512,8 @@ class ChatMessage {
       senderId: asString(pick(json, ['senderId', 'sender_id'])),
       text: asString(pick(json, ['text', 'content'])),
       createdAt: parseApiTime(pick(json, ['createdAt', 'created_at'])),
+      kind: MessageKind.fromKey(asString(json['kind'], 'text')),
+      imageUrl: asString(pick(json, ['imageUrl', 'image_url'])),
     );
   }
 }
@@ -474,6 +535,9 @@ class Conversation {
     this.title = '',
     this.ownerId,
     this.members = const [],
+    this.adminIds = const [],
+    this.mutedUserIds = const [],
+    this.groupMuted = false,
     this.lastMessage,
     this.messages = const [],
     this.unread = 0,
@@ -484,12 +548,40 @@ class Conversation {
   final String title;
   final String? ownerId;
   final List<AppUser> members;
+  final List<String> adminIds;
+  final List<String> mutedUserIds;
+  final bool groupMuted;
   final AppUser peer;
   final ChatMessage? lastMessage;
   final List<ChatMessage> messages;
   final int unread;
 
   bool get isGroup => kind == ConversationKind.group;
+
+  bool isOwner(String? userId) => userId != null && ownerId == userId;
+
+  bool isAdmin(String? userId) => userId != null && adminIds.contains(userId);
+
+  bool canManage(String? userId) => isOwner(userId) || isAdmin(userId);
+
+  bool isMemberMuted(String? userId) => userId != null && mutedUserIds.contains(userId);
+
+  bool canSpeak(String? userId) {
+    if (!isGroup || userId == null) {
+      return true;
+    }
+    if (isOwner(userId)) {
+      return true;
+    }
+    if (isMemberMuted(userId)) {
+      return false;
+    }
+    if (isAdmin(userId)) {
+      return true;
+    }
+    return !groupMuted;
+  }
+
   String get peerId => peer.id;
   String get displayName => isGroup
       ? (title.trim().isEmpty ? '群聊' : title.trim())
@@ -529,6 +621,9 @@ class Conversation {
           ? null
           : asString(pick(json, ['ownerId', 'owner_id'])),
       members: members,
+      adminIds: asStringList(pick(json, ['adminIds', 'admin_ids'])),
+      mutedUserIds: asStringList(pick(json, ['mutedUserIds', 'muted_user_ids'])),
+      groupMuted: asBool(pick(json, ['groupMuted', 'group_muted'])),
       peer: peer,
       lastMessage: last is Map ? ChatMessage.fromJson(asJsonMap(last)) : null,
       unread: asInt(json['unread']),
@@ -539,7 +634,11 @@ class Conversation {
     AppUser? peer,
     ConversationKind? kind,
     String? title,
+    String? ownerId,
     List<AppUser>? members,
+    List<String>? adminIds,
+    List<String>? mutedUserIds,
+    bool? groupMuted,
     ChatMessage? lastMessage,
     List<ChatMessage>? messages,
     int? unread,
@@ -549,8 +648,11 @@ class Conversation {
       id: id,
       kind: kind ?? this.kind,
       title: title ?? this.title,
-      ownerId: ownerId,
+      ownerId: ownerId ?? this.ownerId,
       members: members ?? this.members,
+      adminIds: adminIds ?? this.adminIds,
+      mutedUserIds: mutedUserIds ?? this.mutedUserIds,
+      groupMuted: groupMuted ?? this.groupMuted,
       peer: peer ?? this.peer,
       lastMessage: clearLastMessage ? null : (lastMessage ?? this.lastMessage),
       messages: messages ?? this.messages,
@@ -620,6 +722,137 @@ class MeProfile {
       joinedCircleIds: asStringList(
         pick(json, ['joinedCircleIds', 'joined_circle_ids']),
       ),
+    );
+  }
+}
+
+/// 次元匹配推荐模式。
+enum MatchMode {
+  nearby('nearby', '附近', '把同一座城市的次元信号拉近'),
+  hobby('hobby', '同好', '爱好重叠的人会被点亮'),
+  affinity('affinity', '默契', 'AI 综合气质、圈子与互动做推荐');
+
+  const MatchMode(this.key, this.label, this.hint);
+  final String key;
+  final String label;
+  final String hint;
+
+  static MatchMode fromKey(String? key) {
+    return MatchMode.values.firstWhere(
+      (item) => item.key == key || item.name == key,
+      orElse: () => MatchMode.affinity,
+    );
+  }
+}
+
+/// 匹配分对应的卡片边框档位，分数越高越亮。
+enum MatchBorderTier {
+  white,
+  purple,
+  gold,
+  red;
+
+  static MatchBorderTier fromScore(int score) {
+    if (score >= 85) {
+      return MatchBorderTier.red;
+    }
+    if (score >= 70) {
+      return MatchBorderTier.gold;
+    }
+    if (score >= 50) {
+      return MatchBorderTier.purple;
+    }
+    return MatchBorderTier.white;
+  }
+}
+
+/// AI / 服务端返回的一位推荐住民。
+class MatchCandidate {
+  const MatchCandidate({
+    required this.user,
+    required this.mode,
+    required this.score,
+    required this.city,
+    required this.district,
+    required this.hobbies,
+    required this.sharedHobbies,
+    required this.reason,
+    this.distanceKm,
+    this.online = false,
+  });
+
+  final AppUser user;
+  final MatchMode mode;
+  final int score;
+  final String city;
+  final String district;
+  final List<String> hobbies;
+  final List<String> sharedHobbies;
+  final String reason;
+  final double? distanceKm;
+  final bool online;
+
+  String get userId => user.id;
+
+  bool get isResonance => score >= 80;
+
+  MatchBorderTier get borderTier => MatchBorderTier.fromScore(score);
+
+  String get placeLabel {
+    final districtText = district.trim();
+    if (districtText.isEmpty) {
+      return city;
+    }
+    return '$city · $districtText';
+  }
+
+  String get distanceLabel {
+    final km = distanceKm;
+    if (km == null) {
+      return placeLabel;
+    }
+    if (km < 0.1) {
+      return '就在你身边 · $placeLabel';
+    }
+    if (km < 1) {
+      return '${(km * 1000).round()}m · $placeLabel';
+    }
+    return '${km.toStringAsFixed(km < 10 ? 1 : 0)}km · $placeLabel';
+  }
+
+  /// 窄卡上只留距离或区名，避免竖排换行。
+  String get shortDistanceLabel {
+    final km = distanceKm;
+    if (km == null) {
+      final districtText = district.trim();
+      return districtText.isEmpty ? city : districtText;
+    }
+    if (km < 0.1) {
+      return '身边';
+    }
+    if (km < 1) {
+      return '${(km * 1000).round()}m';
+    }
+    return '${km.toStringAsFixed(km < 10 ? 1 : 0)}km';
+  }
+
+  factory MatchCandidate.fromJson(Map<String, dynamic> json) {
+    final userRaw = json['user'];
+    return MatchCandidate(
+      user: userRaw is Map
+          ? AppUser.fromJson(asJsonMap(userRaw))
+          : AppUser.placeholder(asString(pick(json, ['userId', 'user_id']))),
+      mode: MatchMode.fromKey(asString(json['mode'], 'affinity')),
+      score: asInt(json['score']),
+      city: asString(json['city']),
+      district: asString(json['district']),
+      hobbies: asStringList(json['hobbies']),
+      sharedHobbies: asStringList(pick(json, ['sharedHobbies', 'shared_hobbies'])),
+      reason: asString(pick(json, ['reason', 'prompt'])),
+      distanceKm: json.containsKey('distanceKm') || json.containsKey('distance_km')
+          ? asDouble(pick(json, ['distanceKm', 'distance_km']))
+          : null,
+      online: asBool(json['online']),
     );
   }
 }

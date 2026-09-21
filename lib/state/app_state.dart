@@ -2,7 +2,10 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
+import '../chat/chat_media.dart';
+import '../chat/group_rules.dart';
 import '../data/mock_seed.dart';
+import '../match/match_engine.dart';
 import '../models/models.dart';
 import '../network/api_client.dart';
 import '../network/api_exception.dart';
@@ -26,6 +29,8 @@ class AppState extends ChangeNotifier {
   }
 
   static const _sessionKey = 'dimension_link_user_id';
+  static const _likedMatchKey = 'dimension_link_liked_matches';
+  static const _passedMatchKey = 'dimension_link_passed_matches';
   final _uuid = const Uuid();
   final ApiClient? _api;
 
@@ -42,6 +47,13 @@ class AppState extends ChangeNotifier {
   String? _currentUserId;
   bool _booted = false;
   int _tabIndex = 0;
+  MatchMode _matchMode = MatchMode.affinity;
+  List<MatchCandidate> _matches = [];
+  bool _matchLoading = false;
+  String? _matchError;
+  final Set<String> _likedMatchIds = {};
+  final Set<String> _passedMatchIds = {};
+  MatchCandidate? _resonance;
 
   String? get feedError => _feedError;
   bool get booted => _booted;
@@ -76,6 +88,13 @@ class AppState extends ChangeNotifier {
   List<AppUser> get searchResultUsers => List.unmodifiable(_searchUsers);
   List<Circle> get searchResultCircles => List.unmodifiable(_searchCircles);
   List<Post> get searchResultPosts => List.unmodifiable(_searchPosts);
+
+  MatchMode get matchMode => _matchMode;
+  List<MatchCandidate> get matches => List.unmodifiable(_matches);
+  bool get matchLoading => _matchLoading;
+  String? get matchError => _matchError;
+  MatchCandidate? get resonance => _resonance;
+  Set<String> get likedMatchIds => Set.unmodifiable(_likedMatchIds);
 
   AppUser userById(String id) =>
       findUser(id) ?? (throw StateError('找不到住民 $id'));
@@ -190,6 +209,7 @@ class AppState extends ChangeNotifier {
         _currentUserId = saved;
       }
     }
+    await _restoreMatchMemory();
     _booted = true;
     notifyListeners();
   }
@@ -227,6 +247,7 @@ class AppState extends ChangeNotifier {
       await api.persistSession(session);
       _upsertUser(session.user);
       _currentUserId = session.user.id;
+      await _restoreMatchMemory();
       await _refreshHome();
       notifyListeners();
       return null;
@@ -255,6 +276,7 @@ class AppState extends ChangeNotifier {
     if ((found.password ?? '123456') != password) {
       return '通行证口令不对哦';
     }
+    await _restoreMatchMemory();
     await _setSession(found.id);
     return null;
   }
@@ -482,6 +504,9 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_sessionKey);
     _currentUserId = null;
+    _matches = [];
+    _matchError = null;
+    _resonance = null;
     notifyListeners();
   }
 
@@ -719,21 +744,15 @@ class AppState extends ChangeNotifier {
     if (body.isEmpty) {
       return '先写点什么再发布吧';
     }
+    final blocked = _speakError(conversationId);
+    if (blocked != null) {
+      return blocked;
+    }
     final api = _api;
     if (api != null) {
       try {
-        final message = await api.sendMessage(conversationId, body);
-        _conversations = _conversations.map((item) {
-          if (item.id != conversationId) {
-            return item;
-          }
-          return item.copyWith(
-            unread: 0,
-            lastMessage: message,
-            messages: [...item.messages, message],
-          );
-        }).toList();
-        notifyListeners();
+        final message = await api.sendMessage(conversationId, text: body);
+        _commitOutgoing(conversationId, message);
         return null;
       } on ApiException catch (error) {
         return error.message;
@@ -743,23 +762,67 @@ class AppState extends ChangeNotifier {
     if (meId == null) {
       return '请先登录';
     }
-    final message = ChatMessage(
-      id: _uuid.v4(),
-      senderId: meId,
-      text: body,
-      createdAt: DateTime.now(),
+    _commitOutgoing(
+      conversationId,
+      ChatMessage(
+        id: _uuid.v4(),
+        senderId: meId,
+        text: body,
+        createdAt: DateTime.now(),
+      ),
     );
-    _conversations = _conversations.map((item) {
-      if (item.id != conversationId) {
-        return item;
+    return null;
+  }
+
+  Future<String?> sendChatImage(
+    String conversationId, {
+    String? imageUrl,
+    String? imageBase64,
+    String mimeType = 'image/jpeg',
+    String caption = '',
+  }) async {
+    final illustration = imageUrl != null && isIllustrationUrl(imageUrl);
+    if (!illustration && (imageBase64 == null || imageBase64.isEmpty) && (imageUrl == null || imageUrl.isEmpty)) {
+      return '先选一张图片再发送吧';
+    }
+    final blocked = _speakError(conversationId);
+    if (blocked != null) {
+      return blocked;
+    }
+    final label = caption.trim().isEmpty ? '[图片]' : caption.trim();
+    final api = _api;
+    if (api != null) {
+      try {
+        final message = await api.sendMessage(
+          conversationId,
+          text: label,
+          kind: 'image',
+          imageUrl: illustration ? imageUrl : null,
+          imageBase64: illustration ? null : imageBase64,
+          mimeType: mimeType,
+        );
+        _commitOutgoing(conversationId, message);
+        return null;
+      } on ApiException catch (error) {
+        return error.message;
       }
-      return item.copyWith(
-        unread: 0,
-        lastMessage: message,
-        messages: [...item.messages, message],
-      );
-    }).toList();
-    notifyListeners();
+    }
+    final meId = _currentUserId;
+    if (meId == null) {
+      return '请先登录';
+    }
+    final localUrl = illustration ? imageUrl! : 'data:$mimeType;base64,${imageBase64 ?? ''}';
+    _commitOutgoing(
+      conversationId,
+      ChatMessage(
+        id: _uuid.v4(),
+        senderId: meId,
+        text: label,
+        createdAt: DateTime.now(),
+        kind: MessageKind.image,
+        imageUrl: localUrl,
+      ),
+    );
     return null;
   }
 
@@ -875,6 +938,7 @@ class AppState extends ChangeNotifier {
     final name = title.trim().isEmpty
         ? members.take(3).map((user) => user.nickname).join('、')
         : title.trim();
+    final system = _systemMessage('${userById(meId).nickname} 创建了群聊');
     final created = Conversation(
       id: _uuid.v4(),
       kind: ConversationKind.group,
@@ -894,8 +958,223 @@ class AppState extends ChangeNotifier {
         level: 1,
         badges: const ['群聊'],
       ),
+      lastMessage: system,
+      messages: [system],
     );
     _conversations = [created, ..._conversations];
+    notifyListeners();
+    return null;
+  }
+
+  Future<String?> setGroupAdmin(String conversationId, String userId, {required bool admin}) async {
+    final api = _api;
+    if (api != null) {
+      try {
+        final updated = admin
+            ? await api.setGroupAdmin(conversationId, userId)
+            : await api.removeGroupAdmin(conversationId, userId);
+        _upsertConversation(updated);
+        await loadConversationMessages(conversationId);
+        notifyListeners();
+        return null;
+      } on ApiException catch (error) {
+        return error.message;
+      }
+    }
+    final meId = _currentUserId;
+    if (meId == null) {
+      return '请先登录';
+    }
+    final current = findConversation(conversationId);
+    if (current == null || !current.isGroup) {
+      return '这不是群聊';
+    }
+    if (!canSetGroupAdmin(resolveGroupRole(current, meId))) {
+      return '只有群主能设置管理员';
+    }
+    if (userId == current.ownerId) {
+      return '群主不用再设成管理员';
+    }
+    if (!current.members.any((user) => user.id == userId)) {
+      return '这位住民不在群里';
+    }
+    final name = userById(userId).nickname;
+    final nextAdmins = {...current.adminIds};
+    if (admin) {
+      nextAdmins.add(userId);
+    } else {
+      nextAdmins.remove(userId);
+    }
+    _upsertConversation(
+      _withSystem(
+        current.copyWith(adminIds: nextAdmins.toList()),
+        admin ? '$name 被设为管理员' : '$name 不再是管理员',
+      ),
+    );
+    notifyListeners();
+    return null;
+  }
+
+  Future<String?> setGroupMute(
+    String conversationId, {
+    String? userId,
+    required bool muted,
+  }) async {
+    final api = _api;
+    if (api != null) {
+      try {
+        _upsertConversation(
+          await api.setGroupMute(conversationId, userId: userId, muted: muted),
+        );
+        await loadConversationMessages(conversationId);
+        notifyListeners();
+        return null;
+      } on ApiException catch (error) {
+        return error.message;
+      }
+    }
+    final meId = _currentUserId;
+    if (meId == null) {
+      return '请先登录';
+    }
+    final current = findConversation(conversationId);
+    if (current == null || !current.isGroup) {
+      return '这不是群聊';
+    }
+    final actor = resolveGroupRole(current, meId);
+    if (userId == null) {
+      if (!canToggleGroupMute(actor)) {
+        return '只有群主或管理员能全员禁言';
+      }
+      _upsertConversation(
+        _withSystem(current.copyWith(groupMuted: muted), muted ? '开启了全员禁言' : '关闭了全员禁言'),
+      );
+      notifyListeners();
+      return null;
+    }
+    final target = resolveGroupRole(current, userId);
+    if (!canMuteGroupMember(actor, target)) {
+      return '没有权限禁言这位住民';
+    }
+    if (!current.members.any((user) => user.id == userId)) {
+      return '这位住民不在群里';
+    }
+    final mutedIds = {...current.mutedUserIds};
+    if (muted) {
+      mutedIds.add(userId);
+    } else {
+      mutedIds.remove(userId);
+    }
+    final name = userById(userId).nickname;
+    _upsertConversation(
+      _withSystem(
+        current.copyWith(mutedUserIds: mutedIds.toList()),
+        muted ? '$name 被禁言' : '$name 已解除禁言',
+      ),
+    );
+    notifyListeners();
+    return null;
+  }
+
+  Future<String?> kickGroupMember(String conversationId, String userId) async {
+    final api = _api;
+    if (api != null) {
+      try {
+        _upsertConversation(await api.kickGroupMember(conversationId, userId));
+        await loadConversationMessages(conversationId);
+        notifyListeners();
+        return null;
+      } on ApiException catch (error) {
+        return error.message;
+      }
+    }
+    final meId = _currentUserId;
+    if (meId == null) {
+      return '请先登录';
+    }
+    final current = findConversation(conversationId);
+    if (current == null || !current.isGroup) {
+      return '这不是群聊';
+    }
+    if (!canKickGroupMember(resolveGroupRole(current, meId), resolveGroupRole(current, userId))) {
+      return '没有权限移出这位住民';
+    }
+    if (!current.members.any((user) => user.id == userId)) {
+      return '这位住民不在群里';
+    }
+    final name = userById(userId).nickname;
+    _upsertConversation(
+      _withSystem(
+        current.copyWith(
+          members: current.members.where((user) => user.id != userId).toList(),
+          adminIds: current.adminIds.where((id) => id != userId).toList(),
+          mutedUserIds: current.mutedUserIds.where((id) => id != userId).toList(),
+        ),
+        '$name 被移出了群聊',
+      ),
+    );
+    notifyListeners();
+    return null;
+  }
+
+  Future<String?> leaveGroup(String conversationId) async {
+    final api = _api;
+    if (api != null) {
+      try {
+        await api.leaveGroup(conversationId);
+        _conversations = _conversations.where((item) => item.id != conversationId).toList();
+        notifyListeners();
+        return null;
+      } on ApiException catch (error) {
+        return error.message;
+      }
+    }
+    final meId = _currentUserId;
+    if (meId == null) {
+      return '请先登录';
+    }
+    final current = findConversation(conversationId);
+    if (current == null || !current.isGroup) {
+      return '这不是群聊';
+    }
+    if (current.isOwner(meId)) {
+      final successor = nextGroupOwner(
+        ownerId: meId,
+        adminIds: current.adminIds,
+        memberIds: current.members.map((user) => user.id).toList(),
+      );
+      if (successor == null) {
+        _conversations = _conversations.where((item) => item.id != conversationId).toList();
+        notifyListeners();
+        return null;
+      }
+      final successorName = userById(successor).nickname;
+      final myName = userById(meId).nickname;
+      _upsertConversation(
+        _withSystem(
+          current.copyWith(
+            ownerId: successor,
+            members: current.members.where((user) => user.id != meId).toList(),
+            adminIds: current.adminIds.where((id) => id != meId && id != successor).toList(),
+            mutedUserIds: current.mutedUserIds.where((id) => id != meId).toList(),
+          ),
+          '$myName 把群主交给了 $successorName 并离开了',
+        ),
+      );
+    } else {
+      final myName = userById(meId).nickname;
+      _upsertConversation(
+        _withSystem(
+          current.copyWith(
+            members: current.members.where((user) => user.id != meId).toList(),
+            adminIds: current.adminIds.where((id) => id != meId).toList(),
+            mutedUserIds: current.mutedUserIds.where((id) => id != meId).toList(),
+          ),
+          '$myName 离开了群聊',
+        ),
+      );
+    }
+    _conversations = _conversations.where((item) => item.id != conversationId).toList();
     notifyListeners();
     return null;
   }
@@ -959,6 +1238,8 @@ class AppState extends ChangeNotifier {
       return;
     }
     try {
+      final detail = await api.getConversation(conversationId);
+      _upsertConversation(detail);
       final messages = await api.listMessages(conversationId);
       _conversations = _conversations.map((item) {
         if (item.id != conversationId) {
@@ -973,6 +1254,50 @@ class AppState extends ChangeNotifier {
     } on ApiException {
       return;
     }
+  }
+
+  String? _speakError(String conversationId) {
+    final meId = _currentUserId;
+    if (meId == null) {
+      return '请先登录';
+    }
+    final conversation = findConversation(conversationId);
+    if (conversation != null && !conversation.canSpeak(meId)) {
+      return conversation.isMemberMuted(meId) ? '你已被禁言' : '群主开启了全员禁言';
+    }
+    return null;
+  }
+
+  void _commitOutgoing(String conversationId, ChatMessage message) {
+    _conversations = _conversations.map((item) {
+      if (item.id != conversationId) {
+        return item;
+      }
+      return item.copyWith(
+        unread: 0,
+        lastMessage: message,
+        messages: [...item.messages, message],
+      );
+    }).toList();
+    notifyListeners();
+  }
+
+  ChatMessage _systemMessage(String text) {
+    return ChatMessage(
+      id: _uuid.v4(),
+      senderId: 'system',
+      text: text,
+      createdAt: DateTime.now(),
+      kind: MessageKind.system,
+    );
+  }
+
+  Conversation _withSystem(Conversation conversation, String text) {
+    final message = _systemMessage(text);
+    return conversation.copyWith(
+      lastMessage: message,
+      messages: [...conversation.messages, message],
+    );
   }
 
   Future<void> runSearch(String query) async {
@@ -1002,6 +1327,194 @@ class AppState extends ChangeNotifier {
     } on ApiException {
       return;
     }
+  }
+
+  Future<void> setMatchMode(MatchMode mode) async {
+    if (_matchMode == mode && _matches.isNotEmpty) {
+      return;
+    }
+    _matchMode = mode;
+    notifyListeners();
+    await loadMatches();
+  }
+
+  Future<void> loadMatches({bool refresh = false}) async {
+    if (_currentUserId == null || _matchLoading) {
+      return;
+    }
+    if (refresh) {
+      _passedMatchIds.clear();
+      await _persistMatchMemory();
+    }
+    _matchLoading = true;
+    _matchError = null;
+    notifyListeners();
+
+    final hidden = {..._likedMatchIds, ..._passedMatchIds};
+    try {
+      final next = _api != null
+          ? await _loadRemoteMatches(hidden)
+          : MatchEngine.recommend(
+              me: me,
+              users: _users,
+              mode: _matchMode,
+              posts: _posts,
+              excludedIds: hidden,
+            );
+      _matches = next;
+      if (_matches.isEmpty) {
+        _matchError = refresh ? '这批信号已经看完了，稍后再来试试' : '暂时没有新的次元信号';
+      }
+    } catch (error) {
+      debugPrint('加载匹配失败: $error');
+      _matchError = '匹配信号断开了，稍后再试';
+    }
+    _matchLoading = false;
+    notifyListeners();
+  }
+
+  Future<List<MatchCandidate>> _loadRemoteMatches(Set<String> hidden) async {
+    final api = _api!;
+    try {
+      final remote = await api.listMatchRecommendations(_matchMode.key);
+      if (remote.isNotEmpty) {
+        for (final item in remote) {
+          _upsertUser(item.user);
+        }
+        return [
+          for (final item in remote)
+            if (!hidden.contains(item.userId)) item,
+        ];
+      }
+    } on ApiException catch (error) {
+      debugPrint('匹配接口不可用，改用本地推荐: ${error.message}');
+    }
+
+    try {
+      final result = await api.search('');
+      for (final user in result.users) {
+        _upsertUser(user);
+      }
+    } on ApiException catch (error) {
+      debugPrint('搜索住民失败，仅用已缓存住民推荐: ${error.message}');
+    }
+
+    return MatchEngine.recommend(
+      me: me,
+      users: _users,
+      mode: _matchMode,
+      posts: _posts,
+      excludedIds: hidden,
+    );
+  }
+
+  Future<void> passMatch(String userId) async {
+    _passedMatchIds.add(userId);
+    _matches = [for (final item in _matches) if (item.userId != userId) item];
+    if (_matches.isEmpty) {
+      _matchError = '这批看完了，点右下角换一批';
+    }
+    await _persistMatchMemory();
+    notifyListeners();
+  }
+
+  Future<MatchCandidate?> likeMatch(String userId) async {
+    final liked = await likeMatches([userId]);
+    return liked.isEmpty ? null : liked.first;
+  }
+
+  Future<List<MatchCandidate>> likeMatches(Iterable<String> userIds) async {
+    final unique = [...{...userIds.where((id) => id.isNotEmpty)}];
+    final liked = <MatchCandidate>[];
+    MatchCandidate? resonance;
+    for (final userId in unique) {
+      MatchCandidate? candidate;
+      for (final item in _matches) {
+        if (item.userId == userId) {
+          candidate = item;
+          break;
+        }
+      }
+      candidate ??= _findCachedMatch(userId);
+      if (candidate == null) {
+        continue;
+      }
+      final api = _api;
+      if (api != null) {
+        try {
+          await api.likeMatch(userId);
+        } on ApiException {
+          // 后端尚未上线匹配写入时，本地仍收下心动。
+        }
+      }
+      if (!isFollowing(userId)) {
+        await toggleFollow(userId);
+      }
+      _likedMatchIds.add(userId);
+      liked.add(candidate);
+      if (candidate.isResonance && (resonance == null || candidate.score >= resonance.score)) {
+        resonance = candidate;
+      }
+    }
+    if (liked.isEmpty) {
+      return const [];
+    }
+    final likedIds = {for (final item in liked) item.userId};
+    _matches = [for (final item in _matches) if (!likedIds.contains(item.userId)) item];
+    if (resonance != null) {
+      _resonance = resonance;
+    }
+    if (_matches.isEmpty) {
+      _matchError = '这批看完了，点右下角换一批';
+    }
+    await _persistMatchMemory();
+    notifyListeners();
+    return liked;
+  }
+
+  void clearResonance() {
+    if (_resonance == null) {
+      return;
+    }
+    _resonance = null;
+    notifyListeners();
+  }
+
+  MatchCandidate? _findCachedMatch(String userId) {
+    final user = findUser(userId);
+    if (user == null || _currentUserId == null) {
+      return null;
+    }
+    final list = MatchEngine.recommend(
+      me: me,
+      users: [user],
+      mode: _matchMode,
+      posts: _posts,
+    );
+    return list.isEmpty ? null : list.first;
+  }
+
+  Future<void> _restoreMatchMemory() async {
+    final prefs = await SharedPreferences.getInstance();
+    _likedMatchIds
+      ..clear()
+      ..addAll(_splitIds(prefs.getString(_likedMatchKey)));
+    _passedMatchIds
+      ..clear()
+      ..addAll(_splitIds(prefs.getString(_passedMatchKey)));
+  }
+
+  Future<void> _persistMatchMemory() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_likedMatchKey, _likedMatchIds.join(','));
+    await prefs.setString(_passedMatchKey, _passedMatchIds.join(','));
+  }
+
+  Iterable<String> _splitIds(String? raw) {
+    if (raw == null || raw.trim().isEmpty) {
+      return const [];
+    }
+    return raw.split(',').map((item) => item.trim()).where((item) => item.isNotEmpty);
   }
 
   void _replacePost(String postId, Post Function(Post post) update) {

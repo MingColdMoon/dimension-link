@@ -73,6 +73,11 @@
 | 1011 | 422 | 先写点什么再发布吧 | 动态/评论/私信正文为空 |
 | 1012 | 400 | 不能关注自己 | |
 | 1013 | 422 | 心情签不合法 | mood 非枚举 |
+| 1014 | 422 | 拉群人数不够 | 至少再邀请两位 |
+| 1015 | 403 | 没有群管理权限 | 设管理 / 禁言 / 踢人 |
+| 1016 | 403 | 已被禁言或全员禁言 | 普通成员发言 |
+| 1017 | 422 | 这不是群聊 | 对私信调用群管理接口 |
+| 1018 | 422 | 图片不合法 | 缺图、过大或格式不对 |
 | 4290 | 429 | 操作太频繁，稍后再试 | 限流 |
 | 5000 | 500 | 次元暂时断开了 | 未捕获错误 |
 
@@ -180,19 +185,28 @@
 
 ```json
 {
-  "id": "cv1",
+  "id": "cv_group",
+  "kind": "group",
+  "title": "漫展小队",
+  "ownerId": "u_me",
+  "adminIds": ["u_sakurai"],
+  "mutedUserIds": [],
+  "groupMuted": false,
+  "members": [{ "$ref": "UserPublic" }],
   "peer": { "$ref": "UserPublic" },
   "unread": 1,
   "lastMessage": {
     "id": "m3",
     "senderId": "u_sakurai",
     "text": "太好了，我在西区 Cos 舞台附近等你。",
+    "kind": "text",
+    "imageUrl": "",
     "createdAt": "2026-09-08T13:20:00Z"
   }
 }
 ```
 
-无消息时 `lastMessage` 为 `null`。
+私信 `kind` 为 `direct`。无消息时 `lastMessage` 为 `null`。`adminIds` / `mutedUserIds` / `groupMuted` 仅群聊有意义。
 
 ### ChatMessageItem
 
@@ -201,9 +215,13 @@
   "id": "m2",
   "senderId": "u_me",
   "text": "来！我带新画的小立牌。",
+  "kind": "text",
+  "imageUrl": "",
   "createdAt": "2026-09-08T08:10:00Z"
 }
 ```
+
+`kind`：`text` | `image` | `system`。图片消息 `imageUrl` 为 `illustration:{hue}` 或 `/uploads/...`。系统消息 `senderId` 为 `system`。
 
 ### NoticeItem
 
@@ -244,12 +262,20 @@
 | GET | `/circles/{circleId}` | 圈子详情头图信息 |
 | POST | `/circles/{circleId}/join` | `toggleJoinCircle` |
 | GET | `/conversations` | 消息-私信列表 |
-| POST | `/conversations` | `ensureConversation` |
+| POST | `/conversations` | `ensureConversation` / 拉群 |
+| GET | `/conversations/{id}` | 会话详情（含群角色与禁言） |
 | GET | `/conversations/{id}/messages` | 聊天记录 |
-| POST | `/conversations/{id}/messages` | `sendMessage` |
+| POST | `/conversations/{id}/messages` | `sendMessage` / 发图片 |
 | POST | `/conversations/{id}/read` | `markConversationRead` |
+| POST | `/conversations/{id}/admins` | 设管理员 |
+| DELETE | `/conversations/{id}/admins/{userId}` | 取消管理员 |
+| POST | `/conversations/{id}/mute` | 全员禁言或禁言成员 |
+| POST | `/conversations/{id}/kick` | 移出成员 |
+| POST | `/conversations/{id}/leave` | 退群 |
 | GET | `/notices` | 消息-通知 |
 | GET | `/search` | `SearchScreen` |
+| GET | `/match/recommend` | `MatchScreen` |
+| POST | `/match/{userId}/like` | 心动 |
 
 ---
 
@@ -411,11 +437,53 @@ Toggle。返回 `{ "joined": true, "memberCount": 12841 }`。
 { "text": "来！我带新画的小立牌。" }
 ```
 
-返回 `ChatMessageItem`。发送方该会话未读清零；对方未读 +1。
+发图片（插画卡或相册 Base64，单张 ≤2MB，jpg/png/webp/gif）：
+
+```json
+{ "kind": "image", "imageUrl": "illustration:330", "text": "樱色舞台" }
+```
+
+```json
+{ "kind": "image", "imageBase64": "...", "mimeType": "image/jpeg" }
+```
+
+返回 `ChatMessageItem`。发送方该会话未读清零；对方未读 +1。被禁言的普通成员会得到 `1016`。
 
 ### POST `/conversations/{id}/read`
 
 无 body。返回 `{ "unread": 0 }`。
+
+### POST `/conversations/{id}/admins`
+
+```json
+{ "userId": "u_sakurai" }
+```
+
+仅群主。返回更新后的 `ConversationItem`。
+
+### DELETE `/conversations/{id}/admins/{userId}`
+
+仅群主。取消管理员。
+
+### POST `/conversations/{id}/mute`
+
+```json
+{ "muted": true }
+```
+
+不传 `userId` 表示全员禁言；传 `userId` 则禁言该成员。群主/管理可操作，管理不能管群主或其他管理。
+
+### POST `/conversations/{id}/kick`
+
+```json
+{ "userId": "u_tsukimi" }
+```
+
+移出成员，权限与禁言相同。
+
+### POST `/conversations/{id}/leave`
+
+无 body。群主退群会把群主交给首位管理员，否则下一位成员；只剩自己则解散。返回 `{ "left": true }`。
 
 ### GET `/notices`
 
@@ -444,7 +512,45 @@ Toggle。返回 `{ "joined": true, "memberCount": 12841 }`。
 
 ---
 
-## 12. 客户端改造要点（对接时）
+## 12. 次元匹配
+
+### GET `/match/recommend?mode=`
+
+| 参数 | 说明 |
+| --- | --- |
+| mode | `nearby` 附近 / `hobby` 同好 / `affinity` 默契 |
+| limit | 默认 20，最大 50 |
+
+`data.items[]`：
+
+```json
+{
+  "user": { "$ref": "UserPublic" },
+  "mode": "affinity",
+  "score": 92,
+  "distanceKm": 1.2,
+  "city": "上海",
+  "district": "徐汇",
+  "hobbies": ["插画", "同人"],
+  "sharedHobbies": ["插画"],
+  "reason": "次元共振 92%：因插画紧紧咬合。",
+  "online": true
+}
+```
+
+- 不含当前用户与已心动对象。
+- `score` 为 1–99 的推荐分。
+- 服务端已实现；客户端在接口失败时仍会回退到搜索住民 + 本地推荐引擎。
+
+### POST `/match/{userId}/like`
+
+无 body。记录心动，建议同时关注该住民。返回 `{ "liked": true }`。
+
+心动自己 → 1012。
+
+---
+
+## 13. 客户端改造要点（对接时）
 
 1. 用 `accessToken` 替换 `SharedPreferences` 里的 `dimension_link_user_id`。
 2. `Post.likedBy` / `starredBy` 数组改为 `liked` / `starred` + count，避免全量 id 列表。
@@ -452,7 +558,7 @@ Toggle。返回 `{ "joined": true, "memberCount": 12841 }`。
 4. 所有 toggle 以响应里的布尔值为准，不要本地猜状态。
 5. P1 再加 `imageUrl`、`avatarUrl`；有值则客户端优先显示真实图，否则继续用 hue/emoji。
 
-## 13. 本地联调
+## 14. 本地联调
 
 ```
 POST /v1/auth/login
